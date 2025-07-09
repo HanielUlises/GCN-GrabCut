@@ -49,3 +49,10 @@ Once we’ve run this basic experiment and looked at the segmentations, we’ll 
 - How does it handle occlusion?
 
 But that comes later. For now, it’s all about geometry. Clean forms. White backgrounds. Watching an algorithm do what it does — and trying to understand why it succeeds or fails.
+
+## Visual Reference
+
+Below is an example of one of the synthetic test images used in this exploration.  
+A simple, centered geometric shape on a high-contrast background — no noise, no texture, no ambiguity. This is the kind of input that lets us study GrabCut’s behavior without distractions.
+
+![Synthetic Shape - GrabCut Test](Figure_1.png)
