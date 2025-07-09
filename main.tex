@@ -1,0 +1,130 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{setspace}
+\usepackage{hyperref}
+\usepackage{lipsum} % Placeholder text; optional
+
+\titleformat{\section}{\normalfont\Large\bfseries}{\thesection.}{1em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection.}{1em}{}
+
+\title{\textbf{Preliminary Exploration of the GrabCut Algorithm in Image Segmentation}}
+\author{Haniel Ulises Vásquez Morales}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This document serves as an exploratory research sketch on the GrabCut algorithm for image segmentation. Rather than beginning with a formal hypothesis or benchmark evaluation, the approach adopted here is empirical, reflective, and deliberately incremental. The aim is to study the algorithm’s behavior under controlled variations and to identify potential directions for refinement or theoretical interpretation.
+\end{abstract}
+
+\section{Motivation}
+
+The GrabCut algorithm, introduced by Rother et al.~(2004), is a graph-based segmentation method that combines probabilistic modeling with combinatorial optimization. Despite its age, it remains a pedagogically valuable and technically relevant example of semi-automatic segmentation, especially in contrast with end-to-end deep learning systems.
+
+The purpose of this project is not to outperform modern methods, but rather to examine and understand the internal dynamics of GrabCut: how it reacts to input changes, where it fails, and how it might be modified or extended. This kind of controlled inquiry may lead to conceptual insights about classical segmentation, user interaction, or even hybrid architectures.
+
+\section{Algorithm Overview (to be expanded)}
+
+GrabCut formulates the segmentation task as the minimization of an energy function over a Markov Random Field (MRF), defined on the image pixels. Each pixel is modeled as either foreground or background. The algorithm uses:
+
+\begin{itemize}[itemsep=2pt]
+    \item Gaussian Mixture Models (GMMs) to represent color distributions of foreground and background.
+    \item An energy function $E(\alpha, \theta, z)$ where $\alpha$ is the segmentation mask, $\theta$ are the GMM parameters, and $z$ are the observed pixel values.
+    \item An iterative process alternating between GMM re-estimation and min-cut/max-flow optimization.
+\end{itemize}
+
+In the future, this section may include equations for the energy function and a formal derivation of the graph construction.
+
+\section{Exploratory Framework}
+
+This document serves as a working notebook. Each subsection will correspond to a small-scale experiment, typically involving a variation in initial conditions, followed by qualitative observations and informal reflections.
+
+No benchmark datasets or quantitative evaluations are used at this stage. The aim is to probe specific behaviors and limitations of the algorithm in isolation.
+
+\subsection{Experiment Sketch: Effect of Initialization Rectangle Size}
+
+\textbf{Goal:} To evaluate how the initial bounding box affects segmentation performance.
+
+\textbf{Setup:}
+\begin{itemize}[itemsep=1pt]
+    \item A single image with a well-defined object.
+    \item Three bounding boxes: tight (just around the object), medium (some buffer space), loose (includes significant background).
+    \item Fixed number of iterations (e.g., 5).
+\end{itemize}
+
+\textbf{Anticipated observations:}
+\begin{itemize}
+    \item Tight boxes may lead to truncated object segmentation.
+    \item Loose boxes may lead to foreground contamination with background features.
+    \item The medium case is expected to perform best.
+\end{itemize}
+
+\subsection{Experiment Sketch: Color Space Transformations}
+
+\textbf{Goal:} To explore whether converting the image to alternative color spaces (e.g., HSV, Lab) affects the segmentation performance or GMM separation.
+
+\textbf{Remarks:}
+\begin{itemize}
+    \item HSV may separate hue from brightness, potentially improving robustness to shadows.
+    \item Lab is perceptually uniform; clustering may be more meaningful.
+    \item Results will be compared qualitatively.
+\end{itemize}
+
+\subsection{Future Experiment Ideas (Conceptual)}
+
+\begin{itemize}
+    \item Replace GMM with k-means or kernel density estimators.
+    \item Use superpixels instead of individual pixels to reduce noise and improve spatial coherence.
+    \item Investigate automatic initialization strategies using object detectors or saliency maps.
+    \item Modify the pairwise energy term to weight edges adaptively based on image gradients.
+\end{itemize}
+
+\section{Preliminary Reflections}
+
+Based on early testing, the GrabCut algorithm is highly dependent on initialization. The segmentation mask tends to be conservative, rarely correcting severe misclassifications introduced early in the process. This behavior likely results from the local re-estimation of the GMM and the limited scope of the energy minimization.
+
+In future iterations, it may be fruitful to investigate whether reinforcement (or weakening) of graph edges, or iterative soft supervision, improves robustness.
+
+\section{Next Steps}
+
+\begin{itemize}
+    \item Formalize a small set of controlled images with increasing complexity.
+    \item Implement systematic logging and visualization of masks and GMM parameters across iterations.
+    \item Extend this draft with actual results, figures, and citations as experiments accumulate.
+\end{itemize}
+
+\begin{thebibliography}{99}
+
+\bibitem{rother2004grabcut}
+C.~Rother, V.~Kolmogorov, and A.~Blake, ``GrabCut: Interactive foreground extraction using iterated graph cuts,'' \emph{ACM Transactions on Graphics}, vol.~23, no.~3, pp. 309--314, 2004.
+
+\bibitem{kipf2017semi}
+T.~N. Kipf and M.~Welling, ``Semi-supervised classification with graph convolutional networks,'' in \emph{Proc. International Conference on Learning Representations (ICLR)}, 2017.
+
+\bibitem{wu2020comprehensive}
+Z.~Wu, S.~Pan, F.~Chen, G.~Long, C.~Zhang, and P.~S. Yu, ``A comprehensive survey on graph neural networks,'' \emph{IEEE Transactions on Neural Networks and Learning Systems}, vol.~32, no.~1, pp. 4--24, 2021.
+
+\bibitem{boykov2001fast}
+Y.~Boykov and V.~Kolmogorov, ``An experimental comparison of min-cut/max-flow algorithms for energy minimization in vision,'' \emph{IEEE Transactions on Pattern Analysis and Machine Intelligence}, vol.~26, no.~9, pp. 1124--1137, 2004.
+
+\bibitem{li2019graph}
+Y.~Li, H.~Tian, Z.~Wang, C.~Huang, and Y.~Xu, ``Graph neural networks for image segmentation: A survey,'' \emph{arXiv preprint arXiv:1904.12787}, 2019.
+
+\bibitem{zhang2019graph}
+J.~Zhang, Y.~Li, R.~Yang, and M.~Song, ``Graph convolutional networks: methods, applications, and challenges,'' \emph{IEEE Transactions on Neural Networks and Learning Systems}, 2021, doi: 10.1109/TNNLS.2021.3116864.
+
+\end{thebibliography}
+
+
+% Optionally: cite with BibTeX later
+%\bibliographystyle{plain}
+%\bibliography{grabcut_refs}
+
+\end{document}
