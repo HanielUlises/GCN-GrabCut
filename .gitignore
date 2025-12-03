@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.env
+.venv
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb-*
+
+# Data
+data/
+datasets/
+*.m4a
+*.wav
+*.zip
+*.npz
+*.pt
+*.pth
+*.npy
+
+# Build artifacts
+build/
+dist/
+*.so
+*.dll
+*.dylib
+*.o
+*.a
+
+# C++ / CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Logs
+*.log
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
