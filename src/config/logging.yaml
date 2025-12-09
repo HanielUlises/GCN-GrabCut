@@ -1,0 +1,14 @@
+logging:
+  level: "INFO"
+
+  save_dir: "logs"
+  tensorboard: true
+
+  log_format: "[%(asctime)s] %(levelname)s - %(message)s"
+
+  file:
+    enabled: true
+    filename: "training.log"
+
+  console:
+    enabled: true

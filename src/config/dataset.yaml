@@ -1,0 +1,19 @@
+dataset:
+  name: "bsds500"
+  root: "data/bsds500"
+  split: "train"
+
+  superpixels:
+    num_segments: 150
+    compactness: 10.0
+    sigma: 0.0
+
+  graph:
+    radius_neighbors: false
+    k_neighbors: 8
+    include_self_loops: true
+
+  augmentations:
+    horizontal_flip: true
+    vertical_flip: false
+    color_jitter: false

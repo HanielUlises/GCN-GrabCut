@@ -1,0 +1,20 @@
+model:
+  name: "gcn_segmenter"
+
+  gcn:
+    in_channels: 3
+    hidden_channels: 64
+    out_channels: 2
+    num_layers: 3
+    dropout: 0.1
+
+  graphsage:
+    in_channels: 3
+    hidden_channels: 64
+    out_channels: 2
+    num_layers: 3
+    dropout: 0.1
+
+  initialization:
+    type: "kaiming_uniform"
+    gain: 1.0
