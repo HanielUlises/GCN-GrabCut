@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from src.graph_utils import adjacency_from_segments, build_graph
+from gcn_grabcut.graph_utils import adjacency_from_segments, build_graph
 
 
 def test_adjacency_from_segments():

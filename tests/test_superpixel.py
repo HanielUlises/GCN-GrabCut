@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from src.superpixel import SuperpixelExtractor
+from gcn_grabcut.superpixel import SuperpixelExtractor
 
 
 def test_superpixel_shapes():

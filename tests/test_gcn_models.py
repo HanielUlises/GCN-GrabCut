@@ -1,7 +1,7 @@
 import torch
 from torch_geometric.data import Data
 
-from src.gcn_models import GCN_Segmenter, GraphSAGE_Segmenter
+from gcn_grabcut.gcn_models import GCN_Segmenter, GraphSAGE_Segmenter
 
 
 def build_dummy_graph(num_nodes=5, in_features=3):

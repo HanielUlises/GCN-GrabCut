@@ -1,10 +1,7 @@
-import sys, os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 import numpy as np
 import torch
 
-from src.grabcut_ops import refine_with_grabcut
+from gcn_grabcut.grabcut_ops import refine_with_grabcut
 
 
 def test_refine_with_grabcut_runs():
