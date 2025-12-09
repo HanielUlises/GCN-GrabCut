@@ -9,8 +9,9 @@ class SuperpixelExtractor:
         self.compactness = compactness
 
     def compute(self, img_bgr):
+        img = img_bgr.astype(np.float32) / 255.0
         seg = slic(
-            img_bgr,
+            img,
             n_segments=self.num_segments,
             compactness=self.compactness,
             start_label=0
@@ -19,23 +20,29 @@ class SuperpixelExtractor:
 
     def features(self, img_bgr, segments):
         lab = rgb2lab(img_bgr)
-        n = segments.max() + 1
+        n = int(segments.max() + 1)
+
         feats = np.zeros((n, 3), dtype=np.float32)
         for k in range(n):
-            mk = segments == k
-            feats[k] = lab[mk].mean(0)
+            mask = (segments == k)
+            feats[k] = lab[mask].mean(0)
+
         return feats
 
     def adjacency(self, segments):
         h, w = segments.shape
         edges = set()
+
         for y in range(h - 1):
             for x in range(w - 1):
                 s = segments[y, x]
                 t1 = segments[y, x + 1]
                 t2 = segments[y + 1, x]
+
                 if s != t1:
                     edges.add((min(s, t1), max(s, t1)))
+
                 if s != t2:
                     edges.add((min(s, t2), max(s, t2)))
+
         return np.array(list(edges), dtype=np.int32)
