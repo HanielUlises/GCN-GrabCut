@@ -66,7 +66,7 @@ Path(args.checkpoints).mkdir(exist_ok=True)
 cfg = TrainConfig(
     n_epochs=args.epochs,
     lr=args.lr,
-    amp=(args.device == "cuda"),
+    amp=False,
 )
 
 trainer = Trainer(
