@@ -4,19 +4,20 @@ from dataclasses import dataclass
 from typing import Any, Dict
 
 
-CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+# ---------------------------------------------------------
+# Path handling
+# ---------------------------------------------------------
+
+# This resolves to: GCN-Grabcut/src/config/
+CONFIG_DIR = (Path(__file__).resolve().parent / "config").resolve()
+
+if not CONFIG_DIR.exists():
+    raise RuntimeError(f"CONFIG directory not found at: {CONFIG_DIR}")
 
 
-def load_raw_config(name: str) -> Dict[str, Any]:
-    """
-    Load raw yaml configuration without parsing into dataclasses.
-    """
-    path = CONFIG_DIR / f"{name}.yaml"
-    if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
-
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
+# ---------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------
 
 @dataclass
 class ModelConfig:
@@ -51,6 +52,18 @@ class TrainingConfig:
     batch_size: int
     device: str
 
+def load_raw_config(name: str) -> Dict[str, Any]:
+    """
+    Load a single raw YAML configuration by name (e.g., `model`, `dataset`).
+    """
+    path = CONFIG_DIR / f"{name}.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
+
+
 def create_config(name: str, cls):
     """
     Convert a YAML config into a typed dataclass.
@@ -59,3 +72,16 @@ def create_config(name: str, cls):
     """
     raw = load_raw_config(name)
     return cls(**raw)
+
+
+def load_config() -> Dict[str, Any]:
+    """
+    Load ALL configuration sections at once and return them in a dictionary.
+    This is the main entry point for notebooks and scripts.
+    """
+    return {
+        "model": create_config("model", ModelConfig),
+        "dataset": create_config("dataset", DatasetConfig),
+        "grabcut": create_config("grabcut", GrabCutConfig),
+        "training": create_config("training", TrainingConfig),
+    }

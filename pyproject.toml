@@ -1,0 +1,46 @@
+[project]
+name = "gcn_grabcut"
+version = "0.2.0"
+description = "GCN-based GrabCut segmentation using superpixel graphs"
+authors = [{name = "Haniel Ulises Vásquez Morales"}]
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "scikit-image",
+    "scipy",
+    "networkx",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+torch = [
+    "torch>=2.0",
+    "torch-geometric",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "black",
+    "ruff",
+    "mypy",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
