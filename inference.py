@@ -20,8 +20,6 @@ from pathlib import Path
 from src.gcn_grabcut import GCNGrabCutPipeline
 from src.gcn_grabcut.model import ResGCNNet
 
-# ── Args ──────────────────────────────────────────────────────────────────────
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--image",      required=True,          help="Path to input image")
 parser.add_argument("--checkpoint", default="checkpoints/best_model.pt", help="Model checkpoint")
