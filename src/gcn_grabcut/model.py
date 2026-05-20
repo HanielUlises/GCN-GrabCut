@@ -434,12 +434,12 @@ if _TORCH:
                 gate_sum.scatter_add_(0, dst.unsqueeze(1).expand_as(edge_gate), edge_gate)
                 counts    = torch.bincount(dst, minlength=N).float().clamp(1)
                 gate_avg  = gate_sum / counts.unsqueeze(1)
-                h_res     = h_res * gate_avg
-
+                
+                h_res = h_res * gate_avg
                 h_res = F.gelu(h_res)
                 h_res = F.dropout(h_res, p=self.dropout, training=self.training)
-                h     = h + h_res
-                dense_outputs.append(h)
+                h     = h + h_res 
+                dense_outputs.append(h.detach().clone()) 
 
             h_sage = F.gelu(self.sage_norm(self.sage(h, edge_index)))
             dense_outputs.append(h_sage)
