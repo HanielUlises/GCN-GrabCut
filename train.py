@@ -44,10 +44,7 @@ print(f"[train] device={DEVICE}  model={args.model}  epochs={args.epochs}  lr={a
 
 
 SP_CFG      = SuperpixelGraphConfig(n_segments=300, compactness=10.0, sigma=1.0)
-N_VAL_TRIALS = 3   # click samples per val image for robust evaluation
-
-
-# ── Graph building ──────────────────────────────────────────────────────────
+N_VAL_TRIALS = 3  
 
 def build_graphs_from_raw(raw_samples, augment_factor=0, desc=""):
     records = []
@@ -117,8 +114,6 @@ def make_val_ensemble(rec):
     return graphs, rec["labels"]
 
 
-# ── Data loading ────────────────────────────────────────────────────────────
-
 print("[train] loading raw images...")
 train_raw = load_image_mask_dataset(
     args.images_train, args.masks_train, augment=False, max_size=480)
@@ -133,9 +128,6 @@ print(f"[train] graph build took {time.time()-t0:.1f}s")
 print("[train] building val graphs...")
 val_recs = build_graphs_from_raw(val_raw, augment_factor=0, desc="val: ")
 val_data = [make_val_ensemble(r) for r in val_recs]
-
-
-# ── Model, loss, optimiser ──────────────────────────────────────────────────
 
 model_cls = {"resgcn": ResGCNNet, "gcn": GCNTrimapNet, "gat": GATTrimapNet}[args.model]
 model     = model_cls(dropout=0.30).to(DEVICE)
@@ -154,8 +146,6 @@ scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2)
 scaler    = GradScaler("cuda", enabled=(DEVICE == "cuda"))
 
 
-# ── Helpers ─────────────────────────────────────────────────────────────────
-
 def current_lr():
     return optimizer.param_groups[-1]["lr"]
 
@@ -168,9 +158,6 @@ def iou_per_class(preds, gts, n=3):
         fn = ((preds != c) & (gts == c)).sum()
         ious.append(float(tp) / (float(tp + fp + fn) + 1e-8))
     return ious
-
-
-# ── Train / eval loops ──────────────────────────────────────────────────────
 
 def train_epoch():
     model.train()
@@ -213,7 +200,6 @@ def eval_epoch():
     for graphs, labels in val_data:
         labels = labels.to(DEVICE)
 
-        # average logits across click trials for robust evaluation
         logits_sum = None
         for data in graphs:
             data   = data.to(DEVICE)
@@ -236,8 +222,6 @@ def eval_epoch():
         "iou_fg":  ious[2],
     }
 
-
-# ── Training loop ───────────────────────────────────────────────────────────
 
 best_iou_fg = 0.0
 patience    = 0
