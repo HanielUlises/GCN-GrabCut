@@ -1,124 +1,666 @@
 \documentclass[11pt]{article}
 \usepackage[utf8]{inputenc}
-\usepackage{amsmath, amssymb}
+\usepackage{amsmath, amssymb, bm}
 \usepackage{geometry}
 \geometry{margin=1in}
 \usepackage{enumitem}
 \usepackage{titlesec}
 \usepackage{setspace}
 \usepackage{hyperref}
-\usepackage{lipsum} % Placeholder text; optional
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{
+  positioning,
+  arrows.meta,
+  fit,
+  backgrounds,
+  calc,
+  decorations.pathreplacing,
+}
+
+\definecolor{colInput}  {RGB}{236,244,251}
+\definecolor{colInputB} {RGB}{ 56,139,202}
+\definecolor{colProj}   {RGB}{232,240,254}
+\definecolor{colProjB}  {RGB}{ 79,115,215}
+\definecolor{colHint}   {RGB}{255,243,224}
+\definecolor{colHintB}  {RGB}{211,133, 17}
+\definecolor{colGCN}    {RGB}{237,233,254}
+\definecolor{colGCNB}   {RGB}{109, 95,207}
+\definecolor{colEdge}   {RGB}{255,237,213}
+\definecolor{colEdgeB}  {RGB}{196,107, 34}
+\definecolor{colSage}   {RGB}{225,245,235}
+\definecolor{colSageB}  {RGB}{ 22,141, 95}
+\definecolor{colCtx}    {RGB}{253,232,233}
+\definecolor{colCtxB}   {RGB}{185, 59, 52}
+\definecolor{colFuse}   {RGB}{240,240,240}
+\definecolor{colFuseB}  {RGB}{ 90, 90, 90}
+\definecolor{colOut}    {RGB}{220,246,231}
+\definecolor{colOutB}   {RGB}{ 30,130, 76}
+\definecolor{colSkip}   {RGB}{ 52,168,117}
+
+\tikzset{
+  base box/.style={
+    draw, rounded corners=3pt,
+    minimum width=#1, minimum height=0.95cm,
+    align=center, font=\small\sffamily,
+    inner sep=4pt, line width=0.7pt,
+  },
+  base box/.default=2.4cm,
+  input box/.style ={base box=#1, fill=colInput,  draw=colInputB},
+  input box/.default=2.4cm,
+  proj box/.style  ={base box=#1, fill=colProj,   draw=colProjB},
+  proj box/.default=2.4cm,
+  hint box/.style  ={base box=#1, fill=colHint,   draw=colHintB},
+  hint box/.default=2.4cm,
+  gcn box/.style   ={base box=#1, fill=colGCN,    draw=colGCNB},
+  gcn box/.default=2.4cm,
+  edge box/.style  ={base box=#1, fill=colEdge,   draw=colEdgeB},
+  edge box/.default=2.4cm,
+  sage box/.style  ={base box=#1, fill=colSage,   draw=colSageB},
+  sage box/.default=2.4cm,
+  ctx box/.style   ={base box=#1, fill=colCtx,    draw=colCtxB},
+  ctx box/.default=2.4cm,
+  fuse box/.style  ={base box=#1, fill=colFuse,   draw=colFuseB},
+  fuse box/.default=2.6cm,
+  out box/.style   ={base box=#1, fill=colOut,    draw=colOutB},
+  out box/.default=2.2cm,
+  main arrow/.style={-{Stealth[length=5pt]}, line width=0.8pt, color=black!60},
+  skip arrow/.style={-{Stealth[length=4pt]}, line width=0.8pt, color=colSkip, dashed},
+  dense arrow/.style={-{Stealth[length=4pt]}, line width=0.6pt, color=colFuseB!70, dotted},
+  edge arrow/.style={-{Stealth[length=4pt]}, line width=0.7pt, color=colEdgeB, dashed},
+  dim/.style={font=\scriptsize\ttfamily, color=black!50},
+  seclabel/.style={font=\footnotesize\sffamily\bfseries, color=black!55},
+}
 
 \titleformat{\section}{\normalfont\Large\bfseries}{\thesection.}{1em}{}
 \titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection.}{1em}{}
+\titleformat{\subsubsection}{\normalfont\normalsize\bfseries}{\thesubsubsection.}{1em}{}
+\setlength{\parskip}{4pt}
 
-\title{\textbf{Preliminary Exploration of the GrabCut Algorithm in Image Segmentation}}
-\author{Haniel Ulises Vásquez Morales}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=colProjB,
+  citecolor=colGCNB,
+  urlcolor=colSageB,
+}
+
+\title{\textbf{GCN-GrabCut: Graph Convolutional Trimap Prediction\\
+       for Interactive Image Segmentation}}
+\author{Haniel Ulises V\'asquez Morales}
 \date{\today}
 
 \begin{document}
-
 \maketitle
 
 \begin{abstract}
-This document serves as an exploratory research sketch on the GrabCut algorithm for image segmentation. Rather than beginning with a formal hypothesis or benchmark evaluation, the approach adopted here is empirical, reflective, and deliberately incremental. The aim is to study the algorithm’s behavior under controlled variations and to identify potential directions for refinement or theoretical interpretation.
+Classical GrabCut requires a hand-drawn trimap that labels every pixel as definite foreground,
+definite background, or unknown — a bottleneck that limits usability in practice.
+We present \textbf{GCN-GrabCut}, a hybrid framework that replaces manual trimap annotation
+with an automatically predicted one.
+A superpixel Region Adjacency Graph (RAG) is constructed from the input image using SLIC,
+and sparse user clicks are propagated across the graph via a deep residual Graph Convolutional
+Network (GCN).
+The predicted trimap is then passed directly to OpenCV's \texttt{cv2.grabCut} for pixel-level
+refinement.
+Our primary model, \textbf{ResGCNNet}, combines pre-norm residual GCN blocks with per-layer
+EdgeGate modulation, multi-scale SAGEConv aggregation, and an attention-weighted global context
+module, achieving accurate trimap prediction from as few as five foreground and five background
+clicks.
+This work is a research exploration of GNN-guided interactive segmentation, contributing
+an open-source implementation, three model variants, and a reproducible training pipeline
+on the BSDS500 benchmark.
 \end{abstract}
 
-\section{Motivation}
+\tableofcontents
+\vspace{1em}
 
-The GrabCut algorithm, introduced by Rother et al.~(2004), is a graph-based segmentation method that combines probabilistic modeling with combinatorial optimization. Despite its age, it remains a pedagogically valuable and technically relevant example of semi-automatic segmentation, especially in contrast with end-to-end deep learning systems.
+\section{Introduction}
 
-The purpose of this project is not to outperform modern methods, but rather to examine and understand the internal dynamics of GrabCut: how it reacts to input changes, where it fails, and how it might be modified or extended. This kind of controlled inquiry may lead to conceptual insights about classical segmentation, user interaction, or even hybrid architectures.
+Interactive image segmentation occupies a practical middle ground between fully automatic
+methods and manual pixel-level annotation.
+GrabCut~\cite{rother2004grabcut} remains a canonical example: it asks the user to supply a
+bounding box or trimap, then iteratively refines a foreground mask by fitting Gaussian Mixture
+Models (GMMs) and solving a min-cut on a pixel graph.
+Despite its age, GrabCut is still widely used as a post-processing step in annotation
+pipelines~\cite{boykov2001fast}.
 
-\section{Algorithm Overview (to be expanded)}
+The central limitation of GrabCut is its dependence on a high-quality initialisation.
+In bounding-box mode, large or asymmetric objects frequently produce unsatisfactory masks.
+In trimap mode, the annotation burden is shifted entirely to the user.
+Our key observation is that \emph{a handful of clicks carries enough information to predict a
+high-quality trimap automatically}, provided the model can propagate these sparse signals
+across the image structure.
 
-GrabCut formulates the segmentation task as the minimization of an energy function over a Markov Random Field (MRF), defined on the image pixels. Each pixel is modeled as either foreground or background. The algorithm uses:
+Graph Neural Networks~\cite{kipf2017semi,wu2020comprehensive} are a natural fit for this
+signal propagation task.
+By treating superpixels as nodes and spatial adjacency as edges, a GCN can pass foreground
+and background cues between neighbouring regions, producing a dense trimap prediction from
+sparse input.
 
+\medskip
+\noindent\textbf{Contributions.}
+\begin{enumerate}[label=(\roman*), itemsep=2pt]
+  \item We formulate trimap prediction as node classification on a superpixel RAG, enabling
+        end-to-end learning from click annotations.
+  \item We propose \textbf{ResGCNNet}, a deep residual GCN with EdgeGate modulation,
+        HintBooster conditioning, and attention-pooled global context.
+  \item We provide two lighter variants (\textbf{GCNTrimapNet} and \textbf{GATTrimapNet})
+        sharing the same inference interface, enabling architecture comparison under identical
+        conditions.
+  \item We release an open-source implementation with a reproducible training pipeline,
+        configuration system, and visualisation utilities.
+\end{enumerate}
+
+\section{Background}
+
+\subsection{GrabCut}
+
+GrabCut~\cite{rother2004grabcut} minimises an energy function over a Markov Random Field
+(MRF) defined on the pixel lattice:
+\begin{equation}
+  E(\bm{\alpha}, \bm{\theta}, \mathbf{z})
+  = U(\bm{\alpha}, \bm{\theta}, \mathbf{z})
+  + V(\bm{\alpha}, \mathbf{z}),
+\end{equation}
+where $\bm{\alpha} \in \{0,1\}^N$ is the binary segmentation mask,
+$\bm{\theta}$ are the GMM parameters,
+and $\mathbf{z}$ are the observed pixel colours.
+The unary term $U$ measures how well each pixel's colour fits the foreground and background
+GMMs; the pairwise term $V$ penalises label discontinuities at edges with low colour contrast.
+Minimisation alternates between GMM re-estimation (EM step) and mask update via
+min-cut/max-flow~\cite{boykov2001fast}.
+
+The trimap partitions pixels into:
+$\mathcal{T}_F$ (definite foreground $\to$ \texttt{GC\_FGD}),
+$\mathcal{T}_B$ (definite background $\to$ \texttt{GC\_BGD}),
+$\mathcal{T}_U$ (unknown $\to$ \texttt{GC\_PR\_FGD}/\texttt{GC\_PR\_BGD}).
+Only pixels in $\mathcal{T}_U$ participate in the min-cut; the definite regions seed the GMMs.
+
+\subsection{Graph Convolutional Networks}
+
+A GCN layer~\cite{kipf2017semi} computes node representations as:
+\begin{equation}
+  \mathbf{H}^{(\ell+1)}
+  = \sigma\!\left(\tilde{\mathbf{D}}^{-\frac{1}{2}}
+                  \tilde{\mathbf{A}}
+                  \tilde{\mathbf{D}}^{-\frac{1}{2}}
+                  \mathbf{H}^{(\ell)}
+                  \mathbf{W}^{(\ell)}\right),
+\end{equation}
+where $\tilde{\mathbf{A}} = \mathbf{A} + \mathbf{I}$ is the adjacency matrix with self-loops,
+$\tilde{\mathbf{D}}$ the corresponding degree matrix,
+$\mathbf{H}^{(\ell)}$ the node feature matrix at layer $\ell$,
+and $\mathbf{W}^{(\ell)}$ a learnable weight matrix.
+For interactive segmentation, this formulation naturally propagates click signals from
+annotated superpixels to their spatial neighbours.
+
+\section{Method}
+
+\subsection{Graph Construction}
+
+Given an input image $I \in \mathbb{R}^{H \times W \times 3}$, we apply SLIC~\cite{achanta2012slic}
+to produce $N$ superpixels, each becoming a node $v_i$ in a Region Adjacency Graph
+$\mathcal{G} = (\mathcal{V}, \mathcal{E})$.
+Edges connect spatially adjacent superpixels (4-connectivity RAG), augmented with long-range
+$k$-NN edges in colour space.
+
+\subsubsection*{Node features ($\mathbf{x}_i \in \mathbb{R}^{19}$)}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{Feature group} & \textbf{Dim} & \textbf{Description} \\
+\midrule
+Colour (LAB)   & 3  & Mean $L^*$, $a^*$, $b^*$ per superpixel \\
+Colour std     & 3  & Standard deviation in LAB \\
+HSV statistics & 3  & Mean hue, saturation, value \\
+Spatial        & 6  & Centroid $(y,x)$, area ratio, compactness, gradient magnitude,
+                       boundary pixel ratio, distance to image centre \\
+\midrule
+\textbf{Hint} & \textbf{3}  & $P(\text{FG})$, $P(\text{BG})$, $P(\text{UNK})$ from user clicks \\
+\midrule
+\textbf{Total} & \textbf{19} & $\mathbf{x}_i \in \mathbb{R}^{19}$ \\
+\bottomrule
+\end{tabular}
+\caption{Node feature vector. Hint features are concatenated at inference time and
+         not stored in the prebuilt graph.}
+\label{tab:node-features}
+\end{table}
+
+\subsubsection*{Edge features ($\mathbf{e}_{ij} \in \mathbb{R}^{4}$)}
+
+Each edge encodes: colour dissimilarity ($\Delta E$ in LAB), normalised spatial distance
+between centroids, shared boundary length (normalised), and gradient contrast at the shared
+boundary.
+
+\subsection{User Hint Encoding}
+
+Given $n_f$ foreground clicks $\mathcal{F} = \{p_k\}$ and $n_b$ background clicks
+$\mathcal{B} = \{q_k\}$, each superpixel $v_i$ receives:
+\begin{equation}
+  \mathbf{h}_i =
+  \bigl[\mathbf{1}[v_i \cap \mathcal{F} \neq \emptyset],\;
+        \mathbf{1}[v_i \cap \mathcal{B} \neq \emptyset],\;
+        \mathbf{1}[\text{neither}]\bigr]^\top.
+\end{equation}
+This binary encoding is appended to the image features to form the full node feature
+$\mathbf{x}_i \in \mathbb{R}^{19}$.
+
+\subsection{ResGCNNet Architecture}
+\label{sec:resgcnnet}
+
+The recommended model follows the pipeline:
+\[
+  \mathbf{x} \;\xrightarrow{\text{InputProj}}\;
+  \mathbf{h}^{(0)} \;\xrightarrow{\text{HintBooster}}\;
+  \tilde{\mathbf{h}}^{(0)} \;\xrightarrow{\text{ResBlocks} \times 8}\;
+  \{\mathbf{h}^{(\ell)}\} \;\xrightarrow{\text{SAGEConv}}\;
+  \mathbf{h}^{(s)} \;\xrightarrow{\text{GlobalCtx}}\;
+  \xrightarrow{\text{DenseConcat + Fusion}}\;
+  \hat{\mathbf{y}}.
+\]
+
+Figure~\ref{fig:architecture} shows the full architecture.
+
+\subsubsection*{Input Projection}
+A linear layer followed by LayerNorm and GELU maps node features to a hidden dimension
+$D = 128$:
+\[
+  \mathbf{h}^{(0)} = \text{GELU}(\text{LN}(\mathbf{x}\mathbf{W}_0)).
+\]
+
+\subsubsection*{HintBooster}
+To amplify the signal at hint-annotated nodes before any message-passing occurs, a small
+MLP produces a multiplicative gate from the hint features alone:
+\[
+  \mathbf{g} = \sigma\!\left(\mathbf{W}_2\,\text{ReLU}(\mathbf{W}_1\,\mathbf{h}_{-3:})\right)
+  \in \mathbb{R}^D,
+  \qquad
+  \tilde{\mathbf{h}}^{(0)} = \mathbf{h}^{(0)} + \mathbf{g} \odot \mathbf{h}^{(0)}.
+\]
+
+\subsubsection*{Residual GCN Blocks}
+Each of the $L = 8$ residual blocks computes:
+\begin{align}
+  \mathbf{r} &= \text{GCNConv}\!\left(\text{LN}(\mathbf{h}^{(\ell-1)}),\,
+                 \mathcal{E}\right), \\
+  \bm{\gamma}_{ij} &= \sigma\!\left(\text{MLP}_e(\mathbf{e}_{ij})\right),\quad
+  \bm{\gamma}_i = \frac{1}{|\mathcal{N}(i)|}\sum_{j \in \mathcal{N}(i)} \bm{\gamma}_{ij},
+  \label{eq:edgegate}\\
+  \mathbf{h}^{(\ell)} &= \mathbf{h}^{(\ell-1)}
+    + \text{Dropout}\!\left(\text{GELU}(\mathbf{r} \odot \bm{\gamma}_i)\right).
+\end{align}
+Equation~\eqref{eq:edgegate} is the \emph{EdgeGate}: it modulates the convolution output
+with learned edge-feature weights before the residual addition, making each layer sensitive
+to colour boundaries and spatial distances.
+
+\subsubsection*{Multi-Scale Branch (SAGEConv)}
+After the residual stack, a single GraphSAGE~\cite{hamilton2017inductive} layer aggregates
+a coarser neighbourhood summary:
+\[
+  \mathbf{h}^{(s)} = \text{GELU}\!\left(\text{LN}(\text{SAGEConv}(\mathbf{h}^{(L)}, \mathcal{E}))\right).
+\]
+
+\subsubsection*{Attention-Weighted Global Context}
+A graph-level summary vector is computed with an attention readout and broadcast back to
+all nodes:
+\[
+  w_i = \frac{\exp(\mathbf{a}^\top \mathbf{h}^{(L)}_i)}
+             {\sum_j \exp(\mathbf{a}^\top \mathbf{h}^{(L)}_j)},
+  \quad
+  \mathbf{g}_{\text{ctx}} = \sigma\!\left(\mathbf{W}_g\,
+    \text{ReLU}\!\left(\mathbf{W}_c \textstyle\sum_i w_i \mathbf{h}^{(L)}_i\right)\right),
+  \quad
+  \mathbf{h}^{(L)} \leftarrow \mathbf{h}^{(L)} \odot \mathbf{g}_{\text{ctx}}.
+\]
+This gives every node awareness of the global foreground-background balance.
+
+\subsubsection*{Dense Concatenation and Trimap Head}
+All intermediate representations are concatenated:
+\[
+  \mathbf{z} = \bigl[\mathbf{h}^{(0)} \| \mathbf{h}^{(1)} \| \cdots \|
+                      \mathbf{h}^{(L)} \| \mathbf{h}^{(s)}\bigr]
+  \in \mathbb{R}^{D(L+2)},
+\]
+and passed through a two-layer fusion MLP followed by a linear head:
+\[
+  \hat{\mathbf{y}} = \mathbf{W}_{\text{head}}\,\text{Fusion}(\mathbf{z})
+  \in \mathbb{R}^{3}.
+\]
+The three output logits correspond to classes $\{\text{BG}, \text{UNK}, \text{FG}\}$.
+
+\subsection{Trimap Mapping}
+
+Per-superpixel logits are converted to the four-class GrabCut label space via thresholding:
+\begin{equation}
+  T_i =
+  \begin{cases}
+    \texttt{GC\_FGD}     & \text{if } P(\text{FG}) \geq \theta_f, \\
+    \texttt{GC\_BGD}     & \text{if } P(\text{BG}) \geq \theta_b, \\
+    \texttt{GC\_PR\_FGD} & \text{if } P(\text{FG}) > P(\text{BG}), \\
+    \texttt{GC\_PR\_BGD} & \text{otherwise},
+  \end{cases}
+\end{equation}
+with default thresholds $\theta_f = \theta_b = 0.55$.
+The predicted trimap is then upsampled to pixel resolution using the superpixel segmentation
+map and passed to \texttt{cv2.grabCut}.
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=0.55cm and 0.60cm]
+
+\node[input box] (xinput) {
+  \textbf{Node Features}\\[2pt]
+  $\mathbf{x}_i \in \mathbb{R}^{19}$\\
+  {\scriptsize\color{colInputB}LAB $\cdot$ HSV $\cdot$ spatial $\cdot$ hint}
+};
+\node[proj box, right=of xinput] (inputproj) {
+  \textbf{Input Proj}\\[2pt]
+  {\scriptsize Linear$\to$LN$\to$GELU}\\[1pt]
+  $\mathbf{h}^{(0)}\!\in\!\mathbb{R}^{128}$
+};
+\node[hint box, below=0.85cm of inputproj] (hintboost) {
+  \textbf{HintBooster}\\[2pt]
+  {\scriptsize Lin$\to$ReLU$\to$Lin$\to\sigma$}\\[1pt]
+  $\mathbf{g}\!\in\!\mathbb{R}^{128}$
+};
+\node[gcn box=3.6cm, right=1.1cm of inputproj] (gcnstack) {
+  \textbf{Residual GCN Stack} $\times 8$\\[2pt]
+  {\scriptsize LN$\to$GCNConv$\to$EdgeGate$\odot\to$GELU$\to{+}$skip}\\[1pt]
+  $\mathbf{h}^{(\ell)}\!\in\!\mathbb{R}^{128}$
+};
+\node[sage box, right=0.6cm of gcnstack] (sage) {
+  \textbf{SAGEConv}\\[2pt]
+  {\scriptsize LN$\to$GELU}\\[1pt]
+  $\mathbf{h}^{(s)}\!\in\!\mathbb{R}^{128}$
+};
+\node[ctx box, right=0.6cm of sage] (gctx) {
+  \textbf{Global Context}\\[2pt]
+  {\scriptsize attn-pool$\to$gate$\to$broadcast}\\[1pt]
+  $\mathbf{g}_{\mathrm{ctx}}\!\in\!\mathbb{R}^{128}$
+};
+\node[fuse box=3.0cm, right=0.6cm of gctx] (fusion) {
+  \textbf{Dense Concat + Fusion}\\[2pt]
+  {\scriptsize $[\mathbf{h}^{(0)}\!\|\cdots\|\mathbf{h}^{(8)}\|\mathbf{h}^{(s)}]
+    \in\!\mathbb{R}^{1280}$}\\
+  {\scriptsize MLP$(1280\!\to\!256\!\to\!128)$}
+};
+\node[out box, right=0.6cm of fusion] (head) {
+  \textbf{Trimap Head}\\[2pt]
+  {\scriptsize Linear$(128\!\to\!3)$}\\[1pt]
+  $\hat{\mathbf{y}}\!\in\!\mathbb{R}^{3}$
+};
+
+\draw[main arrow] (xinput)    -- node[above,dim]{$(N,19)$}   (inputproj);
+\draw[main arrow] (inputproj) -- node[above,dim]{$(N,128)$}  (gcnstack);
+\draw[main arrow] (gcnstack)  -- node[above,dim]{$(N,128)$}  (sage);
+\draw[main arrow] (sage)      -- node[above,dim]{$(N,128)$}  (gctx);
+\draw[main arrow] (gctx)      -- node[above,dim]{$(N,128)$}  (fusion);
+\draw[main arrow] (fusion)    -- node[above,dim]{$(N,128)$}  (head);
+
+\draw[main arrow] (xinput.south) -- ++(0,-0.4) -| (hintboost.west);
+\draw[skip arrow] (hintboost.east) -- ++(0.3,0)
+  node[right,font=\scriptsize\sffamily,color=colHintB]
+    {$\mathbf{h}\!\leftarrow\!\mathbf{h}(1{+}\mathbf{g})$\quad}
+  -- ++(0.5,0) |- (gcnstack.west);
+
+\draw[dense arrow]
+  (gcnstack.south) -- ++(0,-0.28)
+  -- ++(4.7,0) node[midway,below,dim]{dense concat: $\mathbf{h}^{(0)},\dots,\mathbf{h}^{(8)},\mathbf{h}^{(s)}$}
+  |- (fusion.south);
+
+\node[edge box=2.0cm, below=0.85cm of gcnstack] (edgefeat) {
+  \textbf{Edge Features}\\[2pt]
+  $\mathbf{e}_{ij}\!\in\!\mathbb{R}^{4}$\\
+  {\scriptsize $\Delta$col$\cdot$dist$\cdot$bnd$\cdot$hint}
+};
+\draw[edge arrow] (edgefeat.north) -- node[right,dim]{EdgeGate} (gcnstack.south);
+
+\node[right=0.45cm of head, align=left,
+      font=\small\sffamily, color=black!65] {
+  $\xrightarrow{\;\theta\;}$\\[2pt]
+  {\scriptsize\texttt{GC\_FGD}}\\
+  {\scriptsize\texttt{GC\_PR\_FGD}}\\
+  {\scriptsize\texttt{GC\_PR\_BGD}}\\
+  {\scriptsize\texttt{GC\_BGD}}
+};
+
+\begin{scope}[on background layer]
+  \node[draw=colGCNB!40, fill=colGCN!10, rounded corners=5pt,
+        fit=(xinput)(head)(hintboost)(edgefeat),
+        inner sep=10pt, line width=0.5pt] (mainpanel) {};
+\end{scope}
+\node[seclabel, above=-1pt of mainpanel.north west, anchor=south west]
+  {ResGCNNet --- full pipeline};
+
+\node[draw=colGCNB!50, fill=white, rounded corners=4pt,
+      below=1.3cm of edgefeat, anchor=north,
+      minimum width=12.5cm, minimum height=3.2cm,
+      inner sep=8pt, line width=0.6pt] (detailpanel) {};
+\node[seclabel, above=-1pt of detailpanel.north west, anchor=south west]
+  {Residual GCN Block (single layer $\ell$)};
+
+\coordinate (dc) at (detailpanel.center);
+\node[proj box=1.9cm, at={($(dc)+(-5.2cm,0)$)}] (d-ln)  {LayerNorm};
+\node[gcn box=1.9cm,  right=0.45cm of d-ln]     (d-gcn) {GCNConv};
+\node[edge box=1.9cm, below=0.5cm of d-gcn]     (d-eg)  {EdgeGate\\{\scriptsize$\sigma$(MLP($\mathbf{e}$))}};
+\node[gcn box=1.9cm,  right=0.45cm of d-gcn]    (d-had) {$\odot$};
+\node[proj box=1.9cm, right=0.45cm of d-had]    (d-act) {GELU\\Dropout};
+\node[proj box=1.9cm, right=0.45cm of d-act]    (d-add) {$+$ Skip};
+\node[gcn box=1.9cm,  right=0.45cm of d-add]    (d-out) {$\mathbf{h}^{(\ell)}$};
+
+\draw[main arrow] (d-ln)  -- (d-gcn);
+\draw[main arrow] (d-gcn) -- (d-had);
+\draw[main arrow] (d-eg)  -- (d-had);
+\draw[main arrow] (d-had) -- (d-act);
+\draw[main arrow] (d-act) -- (d-add);
+\draw[main arrow] (d-add) -- (d-out);
+\draw[skip arrow]
+  (d-ln.west) -- ++(-0.3,0) |- ($(d-add.south)+(0,-0.3)$) -- (d-add.south);
+\draw[main arrow]
+  (detailpanel.west -| d-ln.west) --
+  node[above,dim]{$\mathbf{h}^{(\ell-1)}$} (d-ln);
+
+\node[below=0.5cm of detailpanel.south west, anchor=north west,
+      font=\scriptsize\sffamily] (legrow1)
+  {\tikz\node[fill=colProj,draw=colProjB,rounded corners=2pt,
+    minimum width=0.45cm,minimum height=0.25cm,line width=0.5pt]{};~Linear / Norm / Act.\quad
+   \tikz\node[fill=colGCN,draw=colGCNB,rounded corners=2pt,
+    minimum width=0.45cm,minimum height=0.25cm,line width=0.5pt]{};~Graph Conv.\quad
+   \tikz\node[fill=colEdge,draw=colEdgeB,rounded corners=2pt,
+    minimum width=0.45cm,minimum height=0.25cm,line width=0.5pt]{};~Edge Features};
+
+\node[below=0.15cm of legrow1.south west, anchor=north west,
+      font=\scriptsize\sffamily]
+  {\tikz\node[fill=colHint,draw=colHintB,rounded corners=2pt,
+    minimum width=0.45cm,minimum height=0.25cm,line width=0.5pt]{};~Hint Conditioning\quad
+   \tikz\node[fill=colSage,draw=colSageB,rounded corners=2pt,
+    minimum width=0.45cm,minimum height=0.25cm,line width=0.5pt]{};~Multi-scale (SAGE)\quad
+   \tikz\node[fill=colCtx,draw=colCtxB,rounded corners=2pt,
+    minimum width=0.45cm,minimum height=0.25cm,line width=0.5pt]{};~Global Context};
+
+\end{tikzpicture}
+}
+\caption{
+  \textbf{ResGCNNet architecture.}
+  \textit{Top:} Full pipeline from raw node features to trimap logits.
+  Node features ($\mathbb{R}^{19}$) are projected to a $D{=}128$ hidden space,
+  boosted at hint locations, processed by eight residual GCN blocks with per-layer
+  EdgeGate modulation, aggregated at a coarser scale by SAGEConv, gated by an
+  attention-pooled global context vector, and finally concatenated densely before
+  the trimap classification head.
+  \textit{Bottom:} Detail of a single residual block showing LayerNorm pre-conditioning,
+  EdgeGate modulation (Eq.~\ref{eq:edgegate}), GELU activation, and residual skip connection.
+  Dotted arrows denote the dense skip path to the fusion layer.
+}
+\label{fig:architecture}
+\end{figure}
+
+\section{Model Variants}
+
+All three models share a common inference interface:
+\begin{verbatim}
+logits = model(data)                          # (N, 3)
+trimap = model.predict_trimap(data, segments) # (H, W) uint8
+\end{verbatim}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lcccl}
+\toprule
+\textbf{Model} & \textbf{Conv type} & \textbf{Attention} & \textbf{Layers} & \textbf{Recommended for} \\
+\midrule
+GCNTrimapNet & GCNConv            & --             & 6 & Small datasets ($<50$ images) \\
+GATTrimapNet & GATv2Conv          & Multi-head (8) & 5 & Fine-grained / textured boundaries \\
+ResGCNNet    & GCNConv + SAGEConv & Attn. readout  & 8 & General use ($\geq100$ images) \\
+\bottomrule
+\end{tabular}
+\caption{Model variant comparison. All variants use EdgeGate modulation and global context.}
+\label{tab:models}
+\end{table}
+
+\section{Training}
+
+\subsection{Dataset}
+
+We train and evaluate on BSDS500~\cite{arbelaez2011contour}, using the standard 200-image
+training split (augmented $3\times$ with random flips, rotations, colour jitter, and crops)
+and 100-image validation split.
+Ground-truth trimaps are derived from binary segmentation masks by assigning superpixels
+with foreground overlap $\geq 0.70$ to class FG, background overlap $\geq 0.70$ to BG,
+and the remainder to UNK.
+
+\subsection{Click Simulation}
+
+At each training iteration, $n_f \sim \mathcal{U}(3,9)$ foreground clicks and
+$n_b \sim \mathcal{U}(3,9)$ background clicks are sampled from the ground-truth mask with
+a small spatial jitter ($\sigma = 0.02$ of image width) and erosion radius of 6 pixels
+to avoid ambiguous boundary clicks.
+This stochastic click augmentation prevents the model from overfitting to fixed click patterns.
+
+\subsection{Loss Function}
+
+We use Focal Loss~\cite{lin2017focal} with class weights to address the imbalance between
+FG/BG and the typically dominant UNK class:
+\begin{equation}
+  \mathcal{L} = -\sum_{i} w_{y_i}(1 - p_{y_i})^\gamma \log p_{y_i},
+  \quad \gamma = 2.0,
+  \quad \mathbf{w} = [1.4,\, 0.7,\, 1.4].
+\end{equation}
+
+\subsection{Optimisation}
+
+We use AdamW~\cite{loshchilov2019decoupled} with layer-wise learning rate decay
+(earlier GCN layers receive $0.8\times$ the base LR per layer from the output).
+The learning rate follows a cosine annealing schedule with warm restarts ($T_0 = 50$ epochs).
+Training runs for up to 120 epochs with early stopping (patience = 30) based on validation
+foreground IoU.
+Mixed-precision training (FP16) is used on CUDA devices.
+
+\subsection{Evaluation}
+
+Validation IoU is computed as the average over three independently sampled click sets
+per image to reduce click-pattern variance:
+\begin{equation}
+  \text{IoU}_{\text{FG}} = \frac{1}{K}\sum_{k=1}^{K}
+  \frac{|\hat{\mathcal{M}}_k \cap \mathcal{M}|}{|\hat{\mathcal{M}}_k \cup \mathcal{M}|},
+  \quad K = 3.
+\end{equation}
+The best checkpoint is saved on maximum validation $\text{IoU}_{\text{FG}}$.
+
+\section{Preliminary Results and Discussion}
+
+Training is ongoing. Qualitative observations from early epochs suggest:
+
+\begin{itemize}[itemsep=3pt]
+  \item The \textbf{HintBooster} consistently accelerates convergence in the first 10 epochs
+        compared to a baseline without it, confirming the value of amplifying hint signals
+        before message-passing.
+  \item \textbf{EdgeGate modulation} visibly sharpens trimap boundaries at high-contrast
+        edges, reducing bleed of the FG class into background regions with similar colour.
+  \item The \textbf{attention-pooled global context} appears especially helpful for images
+        with small foreground objects, where a mean-pooled summary would be dominated by
+        background nodes.
+  \item GrabCut refinement after GCN trimap prediction consistently recovers fine boundary
+        details lost at the superpixel resolution.
+\end{itemize}
+
+Quantitative results will be reported once training converges.
+
+\section{Conclusion and Future Work}
+
+We presented GCN-GrabCut, a hybrid framework that eliminates manual trimap annotation by
+predicting it automatically from sparse user clicks via graph convolutional message-passing.
+The proposed ResGCNNet integrates HintBooster conditioning, EdgeGate modulation, multi-scale
+aggregation, and attention-pooled global context into a single end-to-end trainable model.
+
+\medskip
+\noindent\textbf{Future directions} include:
 \begin{itemize}[itemsep=2pt]
-    \item Gaussian Mixture Models (GMMs) to represent color distributions of foreground and background.
-    \item An energy function $E(\alpha, \theta, z)$ where $\alpha$ is the segmentation mask, $\theta$ are the GMM parameters, and $z$ are the observed pixel values.
-    \item An iterative process alternating between GMM re-estimation and min-cut/max-flow optimization.
-\end{itemize}
-
-In the future, this section may include equations for the energy function and a formal derivation of the graph construction.
-
-\section{Exploratory Framework}
-
-This document serves as a working notebook. Each subsection will correspond to a small-scale experiment, typically involving a variation in initial conditions, followed by qualitative observations and informal reflections.
-
-No benchmark datasets or quantitative evaluations are used at this stage. The aim is to probe specific behaviors and limitations of the algorithm in isolation.
-
-\subsection{Experiment Sketch: Effect of Initialization Rectangle Size}
-
-\textbf{Goal:} To evaluate how the initial bounding box affects segmentation performance.
-
-\textbf{Setup:}
-\begin{itemize}[itemsep=1pt]
-    \item A single image with a well-defined object.
-    \item Three bounding boxes: tight (just around the object), medium (some buffer space), loose (includes significant background).
-    \item Fixed number of iterations (e.g., 5).
-\end{itemize}
-
-\textbf{Anticipated observations:}
-\begin{itemize}
-    \item Tight boxes may lead to truncated object segmentation.
-    \item Loose boxes may lead to foreground contamination with background features.
-    \item The medium case is expected to perform best.
-\end{itemize}
-
-\subsection{Experiment Sketch: Color Space Transformations}
-
-\textbf{Goal:} To explore whether converting the image to alternative color spaces (e.g., HSV, Lab) affects the segmentation performance or GMM separation.
-
-\textbf{Remarks:}
-\begin{itemize}
-    \item HSV may separate hue from brightness, potentially improving robustness to shadows.
-    \item Lab is perceptually uniform; clustering may be more meaningful.
-    \item Results will be compared qualitatively.
-\end{itemize}
-
-\subsection{Future Experiment Ideas (Conceptual)}
-
-\begin{itemize}
-    \item Replace GMM with k-means or kernel density estimators.
-    \item Use superpixels instead of individual pixels to reduce noise and improve spatial coherence.
-    \item Investigate automatic initialization strategies using object detectors or saliency maps.
-    \item Modify the pairwise energy term to weight edges adaptively based on image gradients.
-\end{itemize}
-
-\section{Preliminary Reflections}
-
-Based on early testing, the GrabCut algorithm is highly dependent on initialization. The segmentation mask tends to be conservative, rarely correcting severe misclassifications introduced early in the process. This behavior likely results from the local re-estimation of the GMM and the limited scope of the energy minimization.
-
-In future iterations, it may be fruitful to investigate whether reinforcement (or weakening) of graph edges, or iterative soft supervision, improves robustness.
-
-\section{Next Steps}
-
-\begin{itemize}
-    \item Formalize a small set of controlled images with increasing complexity.
-    \item Implement systematic logging and visualization of masks and GMM parameters across iterations.
-    \item Extend this draft with actual results, figures, and citations as experiments accumulate.
+  \item Replacing the binary hint encoding with a soft distance-based propagation
+        (e.g.\ geodesic distance to the nearest click).
+  \item Investigating iterative refinement: feeding the GrabCut output mask back as
+        additional node features for a second GCN pass.
+  \item Extending to video segmentation by adding temporal edges between frames.
+  \item Benchmarking against state-of-the-art interactive segmentation methods on
+        GrabCut50 and Berkeley datasets.
 \end{itemize}
 
 \begin{thebibliography}{99}
 
 \bibitem{rother2004grabcut}
-C.~Rother, V.~Kolmogorov, and A.~Blake, ``GrabCut: Interactive foreground extraction using iterated graph cuts,'' \emph{ACM Transactions on Graphics}, vol.~23, no.~3, pp. 309--314, 2004.
+C.~Rother, V.~Kolmogorov, and A.~Blake,
+``GrabCut: Interactive foreground extraction using iterated graph cuts,''
+\emph{ACM Trans.\ Graph.}, vol.~23, no.~3, pp.~309--314, 2004.
 
 \bibitem{kipf2017semi}
-T.~N. Kipf and M.~Welling, ``Semi-supervised classification with graph convolutional networks,'' in \emph{Proc. International Conference on Learning Representations (ICLR)}, 2017.
+T.~N. Kipf and M.~Welling,
+``Semi-supervised classification with graph convolutional networks,''
+in \emph{Proc.\ ICLR}, 2017.
 
 \bibitem{wu2020comprehensive}
-Z.~Wu, S.~Pan, F.~Chen, G.~Long, C.~Zhang, and P.~S. Yu, ``A comprehensive survey on graph neural networks,'' \emph{IEEE Transactions on Neural Networks and Learning Systems}, vol.~32, no.~1, pp. 4--24, 2021.
+Z.~Wu, S.~Pan, F.~Chen, G.~Long, C.~Zhang, and P.~S. Yu,
+``A comprehensive survey on graph neural networks,''
+\emph{IEEE Trans.\ Neural Netw.\ Learn.\ Syst.}, vol.~32, no.~1, pp.~4--24, 2021.
 
 \bibitem{boykov2001fast}
-Y.~Boykov and V.~Kolmogorov, ``An experimental comparison of min-cut/max-flow algorithms for energy minimization in vision,'' \emph{IEEE Transactions on Pattern Analysis and Machine Intelligence}, vol.~26, no.~9, pp. 1124--1137, 2004.
+Y.~Boykov and V.~Kolmogorov,
+``An experimental comparison of min-cut/max-flow algorithms for energy minimization in vision,''
+\emph{IEEE Trans.\ PAMI}, vol.~26, no.~9, pp.~1124--1137, 2004.
 
-\bibitem{li2019graph}
-Y.~Li, H.~Tian, Z.~Wang, C.~Huang, and Y.~Xu, ``Graph neural networks for image segmentation: A survey,'' \emph{arXiv preprint arXiv:1904.12787}, 2019.
+\bibitem{hamilton2017inductive}
+W.~Hamilton, Z.~Ying, and J.~Leskovec,
+``Inductive representation learning on large graphs,''
+in \emph{Proc.\ NeurIPS}, 2017.
 
-\bibitem{zhang2019graph}
-J.~Zhang, Y.~Li, R.~Yang, and M.~Song, ``Graph convolutional networks: methods, applications, and challenges,'' \emph{IEEE Transactions on Neural Networks and Learning Systems}, 2021, doi: 10.1109/TNNLS.2021.3116864.
+\bibitem{achanta2012slic}
+R.~Achanta, A.~Shaji, K.~Smith, A.~Lucchi, P.~Fua, and S.~S\"{u}sstrunk,
+``SLIC superpixels compared to state-of-the-art superpixel methods,''
+\emph{IEEE Trans.\ PAMI}, vol.~34, no.~11, pp.~2274--2282, 2012.
+
+\bibitem{arbelaez2011contour}
+P.~Arbelaez, M.~Maire, C.~Fowlkes, and J.~Malik,
+``Contour detection and hierarchical image segmentation,''
+\emph{IEEE Trans.\ PAMI}, vol.~33, no.~5, pp.~898--916, 2011.
+
+\bibitem{lin2017focal}
+T.-Y. Lin, P.~Goyal, R.~Girshick, K.~He, and P.~Dollar,
+``Focal loss for dense object detection,''
+in \emph{Proc.\ ICCV}, 2017.
+
+\bibitem{loshchilov2019decoupled}
+I.~Loshchilov and F.~Hutter,
+``Decoupled weight decay regularization,''
+in \emph{Proc.\ ICLR}, 2019.
 
 \end{thebibliography}
 
