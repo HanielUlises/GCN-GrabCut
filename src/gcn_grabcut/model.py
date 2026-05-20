@@ -76,28 +76,14 @@ if _TORCH:
 
         def forward(self, edge_attr: torch.Tensor, edge_index: torch.Tensor, n_nodes: int,
                     node_updates: torch.Tensor) -> torch.Tensor:
-            """
-            Gate the aggregated node messages using projected edge attributes.
-
-            Parameters
-            ----------
-            edge_attr    : (E, edge_dim)
-            edge_index   : (2, E)
-            n_nodes      : int
-            node_updates : (N, hidden_dim) — raw aggregated messages
-
-            Returns
-            -------
-            gated : (N, hidden_dim)
-            """
-            gates = self.proj(edge_attr)
-            dst   = edge_index[1]
-            gate_agg = torch.zeros(n_nodes, gates.size(1), device=gates.device)
+            gates    = self.proj(edge_attr)
+            dst      = edge_index[1]
+            gate_agg = torch.zeros(n_nodes, gates.size(1),
+                                   device=gates.device, dtype=gates.dtype)
             gate_agg.scatter_add_(0, dst.unsqueeze(1).expand_as(gates), gates)
-
-            count = torch.bincount(dst, minlength=n_nodes).float().clamp(min=1)
+            count    = torch.bincount(dst, minlength=n_nodes).to(gates.dtype).clamp(min=1)
             gate_agg = gate_agg / count.unsqueeze(1)
-            return node_updates * gate_agg
+            return node_updates * gate_agg.to(node_updates.dtype)
 
 
     class GlobalContextModule(nn.Module):
@@ -112,8 +98,8 @@ if _TORCH:
             self.expand   = nn.Linear(hidden_dim // 2, hidden_dim)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            w = torch.softmax(self.attn(x), dim=0)          # (N, 1)
-            g = (w * x).sum(dim=0, keepdim=True)            # (1, D) weighted summary
+            w = torch.softmax(self.attn(x), dim=0)
+            g = (w * x).sum(dim=0, keepdim=True)
             g = F.relu(self.compress(g))
             g = torch.sigmoid(self.expand(g))
             return x * g
@@ -203,15 +189,14 @@ if _TORCH:
             edge_attr  = data.edge_attr if data.edge_attr is not None else \
                          torch.zeros(edge_index.size(1), N_EDGE_FEATS, device=x.device)
 
-            h = self.input_proj(x)
+            h     = self.input_proj(x)
             all_h = [h]
 
             for block in self.blocks:
                 h = block(h, edge_index, edge_attr)
                 all_h.append(h)
 
-            h_cat = torch.cat(all_h, dim=-1)
-            return self.head(h_cat)
+            return self.head(torch.cat(all_h, dim=-1))
 
         @torch.no_grad()
         def predict_trimap(
@@ -221,10 +206,8 @@ if _TORCH:
             threshold_fg: float = 0.55,
             threshold_bg: float = 0.55,
         ) -> np.ndarray:
-            """Infer and upsample to pixel trimap."""
             self.eval()
-            logits = self(data)
-            probs  = F.softmax(logits, dim=-1).cpu().numpy()
+            probs = F.softmax(self(data), dim=-1).cpu().numpy()
             return _probs_to_trimap(probs, segments, threshold_fg, threshold_bg)
 
 
@@ -261,12 +244,12 @@ if _TORCH:
                 nn.GELU(),
             )
 
-            self.convs = nn.ModuleList()
-            self.lns   = nn.ModuleList()
+            self.convs      = nn.ModuleList()
+            self.lns        = nn.ModuleList()
             self.edge_gates = nn.ModuleList()
 
             in_dim = hidden_channels
-            for i in range(n_layers):
+            for _ in range(n_layers):
                 self.convs.append(
                     GATv2Conv(
                         in_dim, head_dim,
@@ -283,7 +266,7 @@ if _TORCH:
 
             self.dropout   = dropout
             self.skip_proj = nn.Linear(hidden_channels, in_dim, bias=False)
-            self.ctx  = GlobalContextModule(in_dim)
+            self.ctx       = GlobalContextModule(in_dim)
 
             self.head = nn.Sequential(
                 nn.Linear(in_dim, hidden_channels),
@@ -306,8 +289,8 @@ if _TORCH:
                 h_new = ln(h_new)
                 h_new = F.gelu(h_new)
                 h_new = F.dropout(h_new, p=self.dropout, training=self.training)
-                h_new = eg(edge_attr, edge_index, x.size(0), h_new)
-                h = h_new
+                h_new = eg(edge_attr, edge_index, h_new.size(0), h_new)
+                h     = h_new
 
             h = h + skip
             h = self.ctx(h)
@@ -337,10 +320,16 @@ if _TORCH:
 
         Architecture
         ------------
-        InputProj → [ResBlock × n_layers] → DenseConcat → MultiScaleFusion → Head
+        InputProj → HintBooster → [ResBlock × n_layers] → SAGEConv →
+        GlobalContext → DenseConcat → Fusion → Head
 
-        This is the most expressive model and is recommended when you have ≥100 images.
-        For small datasets (< 50 images), use GCNTrimapNet.
+        dense_in = D * (n_layers + 2):
+            1 initial h  +  n_layers loop outputs  +  1 sage output
+        Global context modulates h in-place before fusion; it does not add
+        an extra slot in dense_outputs.
+
+        This is the most expressive model and is recommended when you have
+        >= 100 images. For small datasets (< 50 images), use GCNTrimapNet.
         """
 
         def __init__(
@@ -383,12 +372,13 @@ if _TORCH:
                     nn.Sigmoid(),
                 ))
 
-            self.sage = SAGEConv(D, D)
+            self.sage      = SAGEConv(D, D)
             self.sage_norm = nn.LayerNorm(D)
 
             self.global_proj = nn.Linear(D, D)
             self.global_gate = nn.Linear(D, D)
 
+            # dense_in: 1 (initial h) + n_layers (loop) + 1 (sage) = n_layers + 2
             dense_in = D * (n_layers + 2)
             self.fusion = nn.Sequential(
                 nn.Linear(dense_in, D * 2),
@@ -400,8 +390,7 @@ if _TORCH:
                 nn.Dropout(dropout * 0.5),
             )
 
-            self.head = nn.Linear(D, n_classes)
-
+            self.head    = nn.Linear(D, n_classes)
             self.dropout = dropout
             self._init_weights()
 
@@ -413,50 +402,50 @@ if _TORCH:
                         nn.init.zeros_(m.bias)
 
         def forward(self, data: "Data") -> torch.Tensor:
-            x          = data.x 
+            x          = data.x
             edge_index = data.edge_index
             edge_attr  = data.edge_attr if data.edge_attr is not None else \
                          torch.zeros(edge_index.size(1), N_EDGE_FEATS, device=x.device)
 
             hints = x[:, -3:]
             h     = self.input_proj(x)
-            hint_gate = self.hint_booster(hints)
-            h = h * (1.0 + hint_gate)
+            h     = h * (1.0 + self.hint_booster(hints))
 
+            # slot 0: initial projected features
             dense_outputs = [h]
 
             for gcn, norm, ep in zip(self.gcn_layers, self.norms, self.edge_projs):
-                h_res = norm(h)
-                h_res = gcn(h_res, edge_index)
+                h_res = gcn(norm(h), edge_index)
 
-                edge_gate = ep(edge_attr)
+                edge_gate = ep(edge_attr)               # (E, D)
                 dst       = edge_index[1]
                 N         = h.size(0)
-                gate_sum  = torch.zeros(N, h.size(1), device=h.device)
-                gate_sum.scatter_add_(0, dst.unsqueeze(1).expand_as(edge_gate), edge_gate)
-                counts    = torch.bincount(dst, minlength=N).float().clamp(1)
-                gate_avg  = gate_sum / counts.unsqueeze(1)
+                gate_sum  = torch.zeros(N, h.size(1),
+                                        device=h.device, dtype=edge_gate.dtype)
+                gate_sum.scatter_add_(
+                    0, dst.unsqueeze(1).expand_as(edge_gate), edge_gate)
+                counts   = torch.bincount(dst, minlength=N).to(
+                               edge_gate.dtype).clamp(1)
+                gate_avg = (gate_sum / counts.unsqueeze(1)).to(h.dtype)
 
-                h_res = h_res * gate_avg
-                h_res = F.gelu(h_res)
+                h_res = F.gelu(h_res * gate_avg)
                 h_res = F.dropout(h_res, p=self.dropout, training=self.training)
-                h     = h + h_res 
-                dense_outputs.append(h.detach().clone()) 
+                h     = h + h_res
+                # slots 1..n_layers: keep gradient path intact (no detach)
+                dense_outputs.append(h)
 
+            # slot n_layers+1: coarser SAGEConv aggregation
             h_sage = F.gelu(self.sage_norm(self.sage(h, edge_index)))
             dense_outputs.append(h_sage)
 
-            # Global context injection
+            # Global context modulates h in-place — does NOT add another slot
             g_mean = h.mean(dim=0, keepdim=True)
-            g_ctx  = torch.sigmoid(self.global_gate(
-                F.gelu(self.global_proj(g_mean))
-            ))
-            h = h * g_ctx
-            dense_outputs.append(h)
+            g_ctx  = torch.sigmoid(self.global_gate(F.gelu(self.global_proj(g_mean))))
+            # apply context gating to last loop output before fusion
+            dense_outputs[-2] = dense_outputs[-2] * g_ctx
 
-            # Dense concatenation + head
-            h_dense = torch.cat(dense_outputs, dim=-1)      # (N, D*(n+2))
-            h_fused = self.fusion(h_dense)
+            h_dense  = torch.cat(dense_outputs, dim=-1)   # (N, D*(n_layers+2))
+            h_fused  = self.fusion(h_dense)
             return self.head(h_fused)
 
         @torch.no_grad()
@@ -482,21 +471,29 @@ if _TORCH:
                 zip(self.gcn_layers, self.norms, self.edge_projs)
             ):
                 decay = 0.8 ** (n - i)
-                groups.append({"params": list(gcn.parameters()) +
-                                         list(norm.parameters()) +
-                                         list(ep.parameters()),
-                               "lr": base_lr * decay})
-            groups.append({"params": list(self.input_proj.parameters()) +
-                                     list(self.hint_booster.parameters()),
-                           "lr": base_lr * 0.5})
-            groups.append({"params": list(self.fusion.parameters()) +
-                                     list(self.head.parameters()),
-                           "lr": base_lr})
-            groups.append({"params": list(self.sage.parameters()) +
-                                     list(self.sage_norm.parameters()) +
-                                     list(self.global_proj.parameters()) +
-                                     list(self.global_gate.parameters()),
-                           "lr": base_lr * 0.9})
+                groups.append({
+                    "params": (list(gcn.parameters()) +
+                               list(norm.parameters()) +
+                               list(ep.parameters())),
+                    "lr": base_lr * decay,
+                })
+            groups.append({
+                "params": (list(self.input_proj.parameters()) +
+                           list(self.hint_booster.parameters())),
+                "lr": base_lr * 0.5,
+            })
+            groups.append({
+                "params": (list(self.fusion.parameters()) +
+                           list(self.head.parameters())),
+                "lr": base_lr,
+            })
+            groups.append({
+                "params": (list(self.sage.parameters()) +
+                           list(self.sage_norm.parameters()) +
+                           list(self.global_proj.parameters()) +
+                           list(self.global_gate.parameters())),
+                "lr": base_lr * 0.9,
+            })
             return groups
 
 
@@ -508,11 +505,9 @@ if _TORCH:
         n_layers:        int   = 6,
         n_classes:       int   = 3,
         dropout:         float = 0.2,
-    ) -> nn.Module:
+    ) -> "nn.Module":
         """
         Factory to select model variant by name.
-
-        Parameters
 
         variant : "resgcn" | "gcn" | "gat"
         """
@@ -532,11 +527,9 @@ if _TORCH:
         raise ValueError(f"Unknown variant '{variant}'. Choose: resgcn | gcn | gat")
 
 
-
-
 def _probs_to_trimap(
-    probs:        np.ndarray,    # (N, 3) [P(BG), P(UNK), P(FG)]
-    segments:     np.ndarray,    # (H, W)
+    probs:        np.ndarray,
+    segments:     np.ndarray,
     threshold_fg: float,
     threshold_bg: float,
 ) -> np.ndarray:
@@ -548,7 +541,7 @@ def _probs_to_trimap(
         mask = segments == nid
         if not mask.any():
             continue
-        bg_p, unk_p, fg_p = probs[nid]
+        bg_p, _unk_p, fg_p = probs[nid]
         if fg_p >= threshold_fg:
             trimap[mask] = TRIMAP_FG
         elif bg_p >= threshold_bg:
