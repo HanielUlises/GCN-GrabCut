@@ -102,17 +102,18 @@ if _TORCH:
 
     class GlobalContextModule(nn.Module):
         """
-        Computes a graph-level summary and broadcasts it back to all nodes.
-        This gives every node access to global image context.
+        Attention-weighted graph readout broadcast back to all nodes.
+        Hint nodes and boundary nodes get higher attention weight naturally.
         """
         def __init__(self, hidden_dim: int):
             super().__init__()
+            self.attn     = nn.Linear(hidden_dim, 1)
             self.compress = nn.Linear(hidden_dim, hidden_dim // 2)
             self.expand   = nn.Linear(hidden_dim // 2, hidden_dim)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            """x : (N, hidden_dim) → returns (N, hidden_dim) context-enriched"""
-            g = x.mean(dim=0, keepdim=True)
+            w = torch.softmax(self.attn(x), dim=0)          # (N, 1)
+            g = (w * x).sum(dim=0, keepdim=True)            # (1, D) weighted summary
             g = F.relu(self.compress(g))
             g = torch.sigmoid(self.expand(g))
             return x * g

@@ -22,6 +22,7 @@ import logging
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Sequence
+from .losses import FocalLoss, LabelSmoothingCE
 
 try:
     import torch
