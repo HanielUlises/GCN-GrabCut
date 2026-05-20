@@ -434,7 +434,7 @@ if _TORCH:
                 gate_sum.scatter_add_(0, dst.unsqueeze(1).expand_as(edge_gate), edge_gate)
                 counts    = torch.bincount(dst, minlength=N).float().clamp(1)
                 gate_avg  = gate_sum / counts.unsqueeze(1)
-                
+
                 h_res = h_res * gate_avg
                 h_res = F.gelu(h_res)
                 h_res = F.dropout(h_res, p=self.dropout, training=self.training)
@@ -449,7 +449,8 @@ if _TORCH:
             g_ctx  = torch.sigmoid(self.global_gate(
                 F.gelu(self.global_proj(g_mean))
             ))
-            dense_outputs = [d * g_ctx for d in dense_outputs]
+            h = h * g_ctx
+            dense_outputs.append(h)
 
             # Dense concatenation + head
             h_dense = torch.cat(dense_outputs, dim=-1)      # (N, D*(n+2))
