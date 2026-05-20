@@ -280,6 +280,7 @@ if _TORCH:
                 self.edge_gates.append(EdgeInjectionLayer(edge_channels, out_dim))
                 in_dim = out_dim
 
+            self.dropout   = dropout
             self.skip_proj = nn.Linear(hidden_channels, in_dim, bias=False)
             self.ctx  = GlobalContextModule(in_dim)
 
@@ -303,7 +304,7 @@ if _TORCH:
                 h_new = conv(h, edge_index, edge_attr)
                 h_new = ln(h_new)
                 h_new = F.gelu(h_new)
-                h_new = F.dropout(h_new, p=0.2, training=self.training)
+                h_new = F.dropout(h_new, p=self.dropout, training=self.training)
                 h_new = eg(edge_attr, edge_index, x.size(0), h_new)
                 h = h_new
 
