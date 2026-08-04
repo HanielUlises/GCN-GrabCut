@@ -3,14 +3,13 @@ Training engine for GCN-GrabCut trimap prediction models.
 
 Features
 --------
-- Mixed-precision training (FP16) when CUDA available
-- Cosine annealing LR with warm restarts
-- Early stopping with patience
-- Per-epoch metrics: loss, acc, IoU-per-class
-- TensorBoard logging (optional)
-- Checkpoint save/load with full training state
-- Class-balanced cross-entropy loss
-- Focal loss option for hard negative mining
+- Graphs are built once, in parallel, and optionally cached on disk
+- Mini-batch training over graphs (PyG `Batch`), not one graph per step
+- Mixed-precision training when CUDA is available
+- Area-weighted focal + soft-Dice objective, or plain focal / smoothed CE
+- Cosine annealing LR with warm restarts, one-cycle, or plateau decay
+- Model selection and early stopping on validation IoU
+- Checkpoint save/load with full training state, TensorBoard logging (optional)
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ import logging
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Sequence
-from .losses import FocalLoss, LabelSmoothingCE
+from .losses import FocalLoss, LabelSmoothingCE, TrimapLoss
 
 try:
     import torch
@@ -32,58 +31,19 @@ try:
     from torch.optim.lr_scheduler import (
         CosineAnnealingWarmRestarts, OneCycleLR, ReduceLROnPlateau
     )
-    from torch.cuda.amp import GradScaler, autocast
+    from torch.amp import GradScaler, autocast
+    from torch_geometric.data import Batch
     _TORCH = True
 except ImportError:
     _TORCH = False
 
-from .dataset import prepare_sample, split_dataset
+from .dataset import prepare_dataset, split_dataset
 from .graph_builder import SuperpixelGraphConfig
 from .model import CLASS_BG, CLASS_UNK, CLASS_FG
 
 logger = logging.getLogger(__name__)
 
 if _TORCH:
-
-    class FocalLoss(nn.Module):
-        """
-        Focal Loss for class imbalance.
-        FL(p) = -α(1-p)^γ · log(p)
-
-        Especially useful when UNKNOWN class dominates the label distribution.
-        """
-        def __init__(self, gamma: float = 2.0, weight: Optional[torch.Tensor] = None):
-            super().__init__()
-            self.gamma  = gamma
-            self.weight = weight
-
-        def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-            ce    = F.cross_entropy(logits, labels, weight=self.weight, reduction="none")
-            p_t   = torch.exp(-ce)
-            focal = ((1 - p_t) ** self.gamma) * ce
-            return focal.mean()
-
-
-    class LabelSmoothingCE(nn.Module):
-        """Cross-entropy with label smoothing — reduces overconfidence."""
-        def __init__(self, smoothing: float = 0.1, weight: Optional[torch.Tensor] = None):
-            super().__init__()
-            self.smoothing = smoothing
-            self.weight    = weight
-
-        def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-            n_classes = logits.size(-1)
-            log_probs = F.log_softmax(logits, dim=-1)
-
-            with torch.no_grad():
-                smooth = torch.full_like(log_probs, self.smoothing / (n_classes - 1))
-                smooth.scatter_(1, labels.unsqueeze(1), 1.0 - self.smoothing)
-            loss = -(smooth * log_probs).sum(dim=-1)
-            if self.weight is not None:
-                w = self.weight[labels]
-                loss = loss * w
-            return loss.mean()
-
 
     @dataclass
     class TrainConfig:
@@ -92,10 +52,12 @@ if _TORCH:
         weight_decay:    float = 1e-4
         optimizer:       str   = "adamw"
         scheduler:       str   = "cosine_warm"
-        loss_fn:         str   = "focal"
+        loss_fn:         str   = "trimap"
         focal_gamma:     float = 2.0
+        dice_weight:     float = 0.5
         label_smoothing: float = 0.1
         class_weights:   list  = field(default_factory=lambda: [1.5, 0.8, 1.5])
+        batch_size:      int   = 8
         amp:             bool  = True
         grad_clip:       float = 1.0
         early_stop_patience: int = 15
@@ -103,6 +65,8 @@ if _TORCH:
         t_mult:          int   = 2
         val_every:       int   = 1
         save_every:      int   = 5
+        prep_workers:    int   = 0
+        cache_dir:       Optional[str] = None
         verbose:         bool  = True
         log_dir:         Optional[str] = None
 
@@ -143,7 +107,12 @@ if _TORCH:
             w = torch.tensor(self.cfg.class_weights, dtype=torch.float32).to(device) \
                 if self.cfg.class_weights else None
 
-            if self.cfg.loss_fn == "focal":
+            if self.cfg.loss_fn == "trimap":
+                self.criterion = TrimapLoss(
+                    gamma=self.cfg.focal_gamma, weight=w,
+                    dice_weight=self.cfg.dice_weight,
+                )
+            elif self.cfg.loss_fn == "focal":
                 self.criterion = FocalLoss(gamma=self.cfg.focal_gamma, weight=w)
             elif self.cfg.loss_fn == "smooth_ce":
                 self.criterion = LabelSmoothingCE(
@@ -172,16 +141,16 @@ if _TORCH:
             self.scheduler = None
 
 
-            self.scaler = GradScaler() if (self.cfg.amp and device == "cuda") else None
+            self.scaler = GradScaler("cuda") if (self.cfg.amp and device == "cuda") else None
 
 
             self.history = {
                 "train_loss": [], "val_loss": [],
                 "val_acc":    [], "val_iou_bg": [], "val_iou_unk": [], "val_iou_fg": [],
-                "lr":         [],
+                "val_score":  [], "lr": [],
             }
-            self._best_val_loss = float("inf")
-            self._patience_ctr  = 0
+            self._best_score   = -float("inf")
+            self._patience_ctr = 0
 
             self._tb = None
             if self.cfg.log_dir:
@@ -211,16 +180,31 @@ if _TORCH:
             -------
             history dict with per-epoch metrics
             """
-            print(f"[Trainer] Preparing graphs for {len(train_samples)} train samples...")
-            t_start = time.time()
-            train_data = [prepare_sample(s, sp_config) for s in train_samples]
-            val_data   = [prepare_sample(s, sp_config) for s in val_samples] \
-                         if val_samples else None
-            print(f"[Trainer] Graph preparation took {time.time()-t_start:.1f}s")
-
-            self._init_scheduler(len(train_data))
-
             cfg = self.cfg
+            train_data = prepare_dataset(
+                train_samples, sp_config, cache_dir=cfg.cache_dir,
+                workers=cfg.prep_workers, desc="train: ", keep_segments=False,
+            )
+            val_data = prepare_dataset(
+                val_samples, sp_config, cache_dir=cfg.cache_dir,
+                workers=cfg.prep_workers, desc="val: ", keep_segments=False,
+            ) if val_samples else None
+
+            # An empty split would otherwise "train" silently: every epoch
+            # would average zero batches, report a loss of zero, and save
+            # checkpoints that were never updated.
+            if not train_data:
+                raise RuntimeError(
+                    f"no training graphs were prepared from {len(train_samples)} "
+                    "samples — check the image and mask directories, and the "
+                    "preparation warnings above")
+            if val_samples and not val_data:
+                raise RuntimeError(
+                    f"no validation graphs were prepared from {len(val_samples)} "
+                    "samples; model selection would have nothing to rank")
+
+            self._init_scheduler(self._n_steps(len(train_data)))
+
             for epoch in range(1, cfg.n_epochs + 1):
                 t0  = time.time()
                 tl  = self._train_epoch(train_data)
@@ -240,10 +224,12 @@ if _TORCH:
                         self._tb.add_scalar("val/acc",     vm["acc"],     epoch)
                         self._tb.add_scalar("val/iou_fg",  vm["iou_fg"],  epoch)
 
-                    if vm["loss"] < self._best_val_loss:
-                        self._best_val_loss = vm["loss"]
-                        self._patience_ctr  = 0
-                        self._save("best_model.pt", epoch=epoch, val_loss=vm["loss"])
+                    self.history["val_score"].append(vm["score"])
+                    if vm["score"] > self._best_score:
+                        self._best_score   = vm["score"]
+                        self._patience_ctr = 0
+                        self._save("best_model.pt", epoch=epoch,
+                                   val_loss=vm["loss"], score=vm["score"])
                     else:
                         self._patience_ctr += 1
 
@@ -253,6 +239,7 @@ if _TORCH:
                             f"Epoch {epoch:3d}/{cfg.n_epochs} | "
                             f"train_loss={tl:.4f} | val_loss={vm['loss']:.4f} | "
                             f"val_acc={vm['acc']:.4f} | IoU_fg={vm['iou_fg']:.4f} | "
+                            f"score={vm['score']:.4f} | "
                             f"lr={self._current_lr():.2e} | {dt:.1f}s"
                         )
 
@@ -278,35 +265,57 @@ if _TORCH:
                 self._tb.close()
             return self.history
 
+        def _n_steps(self, n_samples: int) -> int:
+            bs = max(1, self.cfg.batch_size)
+            return max(1, (n_samples + bs - 1) // bs)
+
+        def _batches(self, data_list: list, shuffle: bool):
+            """Yield `Batch` objects of `batch_size` graphs each."""
+            bs    = max(1, self.cfg.batch_size)
+            order = (torch.randperm(len(data_list)).tolist() if shuffle
+                     else list(range(len(data_list))))
+            for i in range(0, len(order), bs):
+                chunk = [data_list[j][0] for j in order[i:i + bs]]
+                yield Batch.from_data_list(chunk).to(self.device)
+
+        def _loss(self, batch, logits: torch.Tensor) -> torch.Tensor:
+            """Evaluate the criterion, passing the extra supervision it accepts."""
+            labels = batch.y
+            if isinstance(self.criterion, TrimapLoss):
+                return self.criterion(
+                    logits, labels,
+                    area=getattr(batch, "node_area", None),
+                    fg_ratio=getattr(batch, "fg_ratio", None),
+                    batch=getattr(batch, "batch", None),
+                )
+            return self.criterion(logits, labels)
+
         def _train_epoch(self, data_list: list) -> float:
             self.model.train()
             total_loss = 0.0
-            order      = torch.randperm(len(data_list)).tolist()
+            n_batches  = 0
 
-            for idx in order:
-                data, labels, _ = data_list[idx]
-                data   = data.to(self.device)
-                labels = labels.to(self.device)
-
-                self.optimizer.zero_grad()
+            for batch in self._batches(data_list, shuffle=True):
+                self.optimizer.zero_grad(set_to_none=True)
 
                 if self.scaler:
-                    with autocast():
-                        logits = self.model(data)
-                        loss   = self.criterion(logits, labels)
+                    with autocast("cuda"):
+                        loss = self._loss(batch, self.model(batch))
                     self.scaler.scale(loss).backward()
                     self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.grad_clip)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(),
+                                                   self.cfg.grad_clip)
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                 else:
-                    logits = self.model(data)
-                    loss   = self.criterion(logits, labels)
+                    loss = self._loss(batch, self.model(batch))
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.grad_clip)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(),
+                                                   self.cfg.grad_clip)
                     self.optimizer.step()
 
-                total_loss += loss.item()
+                total_loss += float(loss.item())
+                n_batches  += 1
 
                 if isinstance(self.scheduler, OneCycleLR):
                     self.scheduler.step()
@@ -314,37 +323,41 @@ if _TORCH:
             if self.scheduler and not isinstance(self.scheduler, (OneCycleLR, ReduceLROnPlateau)):
                 self.scheduler.step()
 
-            return total_loss / max(len(data_list), 1)
+            return total_loss / max(n_batches, 1)
 
         @torch.no_grad()
         def _eval_epoch(self, data_list: list) -> dict:
             self.model.eval()
             total_loss = 0.0
-            all_preds  = []
-            all_labels = []
+            n_batches  = 0
+            all_preds, all_labels = [], []
 
-            for data, labels, _ in data_list:
-                data   = data.to(self.device)
-                labels = labels.to(self.device)
-                logits = self.model(data)
-                total_loss += self.criterion(logits, labels).item()
+            for batch in self._batches(data_list, shuffle=False):
+                logits = self.model(batch)
+                total_loss += float(self._loss(batch, logits).item())
+                n_batches  += 1
                 all_preds.append(logits.argmax(dim=-1).cpu())
-                all_labels.append(labels.cpu())
+                all_labels.append(batch.y.cpu())
 
-            preds  = torch.cat(all_preds)
-            gts    = torch.cat(all_labels)
-            acc    = (preds == gts).float().mean().item()
-            ious   = _per_class_iou(preds.numpy(), gts.numpy(), n_classes=3)
+            preds = torch.cat(all_preds)
+            gts   = torch.cat(all_labels)
+            acc   = (preds == gts).float().mean().item()
+            ious  = _per_class_iou(preds.numpy(), gts.numpy(), n_classes=3)
+            loss  = total_loss / max(n_batches, 1)
 
             if isinstance(self.scheduler, ReduceLROnPlateau):
-                self.scheduler.step(total_loss / max(len(data_list), 1))
+                self.scheduler.step(loss)
 
             return {
-                "loss":    total_loss / max(len(data_list), 1),
+                "loss":    loss,
                 "acc":     acc,
                 "iou_bg":  ious[CLASS_BG],
                 "iou_unk": ious[CLASS_UNK],
                 "iou_fg":  ious[CLASS_FG],
+                # Selection criterion: the mean of the two decided classes.
+                # Validation loss is a poor proxy here because the UNKNOWN
+                # class dominates it while GrabCut resolves it downstream.
+                "score":   0.5 * (ious[CLASS_FG] + ious[CLASS_BG]),
             }
 
         def _init_scheduler(self, steps_per_epoch: int) -> None:
@@ -370,13 +383,16 @@ if _TORCH:
         def _current_lr(self) -> float:
             return self.optimizer.param_groups[-1]["lr"]
 
-        def _save(self, filename: str, epoch: int, val_loss: Optional[float]) -> None:
+        def _save(self, filename: str, epoch: int, val_loss: Optional[float],
+                  score: Optional[float] = None) -> None:
             path  = self.save_dir / filename
             state = {
                 "model":     self.model.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
                 "epoch":     epoch,
                 "val_loss":  val_loss,
+                "score":     score,
+                "config":    asdict(self.cfg),
             }
             if self.scheduler:
                 state["scheduler"] = self.scheduler.state_dict()
