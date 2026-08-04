@@ -2,7 +2,9 @@
 
 **Automatic image segmentation by graph-convolutional trimap prediction and GrabCut refinement**
 
-Haniel Ulises Vásquez Morales · Python 3.9+ · PyTorch 2.0+ · PyTorch Geometric · OpenCV · MIT licence
+![Python](https://img.shields.io/badge/Python-3.10%2B-6e6e6e?style=flat-square&labelColor=2b2b2b&logo=python&logoColor=white) ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-6e6e6e?style=flat-square&labelColor=2b2b2b&logo=pytorch&logoColor=white) ![PyTorch Geometric](https://img.shields.io/badge/PyTorch_Geometric-2.x-6e6e6e?style=flat-square&labelColor=2b2b2b&logo=pyg&logoColor=white) ![OpenCV](https://img.shields.io/badge/OpenCV-4.x-6e6e6e?style=flat-square&labelColor=2b2b2b&logo=opencv&logoColor=white) ![DUTS mask IoU](https://img.shields.io/badge/DUTS_mask_IoU-0.58-6e6e6e?style=flat-square&labelColor=2b2b2b) [![License MIT](https://img.shields.io/badge/License-MIT-6e6e6e?style=flat-square&labelColor=2b2b2b)](LICENSE)
+
+Haniel Ulises Vásquez Morales
 
 ---
 

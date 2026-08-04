@@ -1,9 +1,10 @@
 [project]
 name = "gcn_grabcut"
-version = "0.2.0"
+version = "0.3.0"
 description = "GCN-based GrabCut segmentation using superpixel graphs"
 authors = [{name = "Haniel Ulises Vásquez Morales"}]
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.10"
 
 dependencies = [
