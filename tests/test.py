@@ -116,7 +116,22 @@ class TestGraphBuilder:
         assert np.unique(graph.segments).min() == 0
         assert np.unique(graph.segments).max() == graph.n_nodes - 1
 
-    def test_encode_hints(self):
+    def test_auto_prior(self):
+        from gcn_grabcut.graph_builder import GraphBuilder, N_PRIOR_FEATS
+        img   = _img(64, 64)
+        graph = GraphBuilder(img).build()
+        prior = graph.prior_features
+        assert prior.shape == (graph.n_nodes, N_PRIOR_FEATS)
+        assert prior.min() >= -1e-5 and prior.max() <= 1 + 1e-5
+        assert np.isfinite(prior).all()
+
+    def test_node_input_dim(self):
+        from gcn_grabcut.graph_builder import GraphBuilder, N_NODE_FEATS
+        img   = _img(64, 64)
+        graph = GraphBuilder(img).build()
+        assert graph.node_input().shape == (graph.n_nodes, N_NODE_FEATS)
+
+    def test_encode_hints_legacy(self):
         from gcn_grabcut.graph_builder import GraphBuilder, encode_user_hints
         img   = _img(64, 64)
         graph = GraphBuilder(img).build()
@@ -163,7 +178,6 @@ class TestDataset:
         assert len(samples) >= 5
         s = samples[0]
         assert "image" in s and "gt_mask" in s
-        assert "fg_points" in s and "bg_points" in s
         assert s["image"].dtype == np.uint8
         assert set(np.unique(s["gt_mask"])).issubset({0, 1})
 
@@ -240,13 +254,21 @@ class TestModel:
         pytest.importorskip("torch")
         pytest.importorskip("torch_geometric")
 
-    def _make_data(self, N=80, in_dim=19, edge_dim=4):
+    def _make_data(self, N=80, in_dim=None, edge_dim=None, seed=None):
         import torch
         from torch_geometric.data import Data
-        x = torch.randn(N, in_dim)
+        from gcn_grabcut.graph_builder import N_NODE_FEATS, N_EDGE_FEATS
+
+        in_dim   = N_NODE_FEATS if in_dim   is None else in_dim
+        edge_dim = N_EDGE_FEATS if edge_dim is None else edge_dim
+        gen = None
+        if seed is not None:
+            gen = torch.Generator(); gen.manual_seed(seed)
+
+        x = torch.randn(N, in_dim, generator=gen)
         src = torch.arange(N - 1); dst = torch.arange(1, N)
         edge_index = torch.stack([torch.cat([src, dst]), torch.cat([dst, src])])
-        edge_attr  = torch.rand(edge_index.size(1), edge_dim)
+        edge_attr  = torch.rand(edge_index.size(1), edge_dim, generator=gen)
         return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
 
     @pytest.mark.parametrize("variant", ["gcn", "gat", "resgcn"])
@@ -265,22 +287,45 @@ class TestModel:
         model.eval()
         d1 = self._make_data(seed=1)
         d2 = self._make_data(seed=2)
-
-        def _make_data_seeded(seed):
-            import torch
-            from torch_geometric.data import Data
-            rng = torch.Generator(); rng.manual_seed(seed)
-            N = 80
-            x = torch.randn(N, 19, generator=rng)
-            src = torch.arange(N - 1); dst = torch.arange(1, N)
-            ei = torch.stack([torch.cat([src, dst]), torch.cat([dst, src])])
-            ea = torch.rand(ei.size(1), 4, generator=rng)
-            return Data(x=x, edge_index=ei, edge_attr=ea)
-
-        d1 = _make_data_seeded(1); d2 = _make_data_seeded(2)
         with torch.no_grad():
             o1 = model(d1); o2 = model(d2)
         assert not torch.allclose(o1, o2)
+
+    def test_batched_equals_single(self):
+        """A batch of graphs must give the same per-node logits as one at a time."""
+        import torch
+        from torch_geometric.data import Batch
+        from gcn_grabcut.model import build_model
+
+        for variant in ("gcn", "gat", "resgcn"):
+            model = build_model(variant, hidden_channels=32, n_layers=2).eval()
+            graphs = [self._make_data(N=40, seed=s) for s in (1, 2, 3)]
+            with torch.no_grad():
+                one_by_one = torch.cat([model(g) for g in graphs])
+                batched    = model(Batch.from_data_list(graphs))
+            assert torch.allclose(one_by_one, batched, atol=1e-4), variant
+
+    @pytest.mark.skipif(not __import__("torch").cuda.is_available(),
+                        reason="autocast path requires CUDA")
+    def test_autocast_forward_backward(self):
+        """Mixed precision must not break the per-graph reductions."""
+        import torch
+        from torch_geometric.data import Batch
+        from gcn_grabcut.losses import TrimapLoss
+        from gcn_grabcut.model import build_model
+
+        for variant in ("gcn", "gat", "resgcn"):
+            model  = build_model(variant, hidden_channels=32, n_layers=2).cuda()
+            graphs = [self._make_data(N=30, seed=s) for s in (1, 2)]
+            batch  = Batch.from_data_list(graphs).cuda()
+            labels = torch.randint(0, 3, (batch.x.size(0),), device="cuda")
+            area   = torch.rand(batch.x.size(0), device="cuda")
+
+            with torch.autocast("cuda"):
+                loss = TrimapLoss()(model(batch), labels, area=area,
+                                    batch=batch.batch)
+            loss.backward()
+            assert torch.isfinite(loss), variant
 
     def test_predict_trimap(self):
         import torch
@@ -289,10 +334,11 @@ class TestModel:
         model = ResGCNNet(hidden_channels=32, n_layers=2)
         segs  = np.zeros((32, 32), dtype=np.int32)
         segs[16:, :] = 1
+        from gcn_grabcut.graph_builder import N_NODE_FEATS, N_EDGE_FEATS
         N = 2
-        x = torch.randn(N, 19)
+        x = torch.randn(N, N_NODE_FEATS)
         ei = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
-        ea = torch.rand(2, 4)
+        ea = torch.rand(2, N_EDGE_FEATS)
         data = Data(x=x, edge_index=ei, edge_attr=ea)
         tri  = model.predict_trimap(data, segs)
         assert tri.shape == (32, 32)
@@ -334,7 +380,7 @@ class TestTrainer:
 
     def test_focal_loss(self):
         import torch
-        from gcn_grabcut.trainer import FocalLoss
+        from gcn_grabcut.losses import FocalLoss
         loss_fn = FocalLoss(gamma=2.0)
         logits  = torch.randn(100, 3)
         labels  = torch.randint(0, 3, (100,))
@@ -343,12 +389,38 @@ class TestTrainer:
 
     def test_label_smooth_loss(self):
         import torch
-        from gcn_grabcut.trainer import LabelSmoothingCE
+        from gcn_grabcut.losses import LabelSmoothingCE
         loss_fn = LabelSmoothingCE(smoothing=0.1)
         logits  = torch.randn(50, 3)
         labels  = torch.randint(0, 3, (50,))
         loss    = loss_fn(logits, labels)
         assert loss.item() > 0
+
+    def test_trimap_loss_area_weighting(self):
+        """A mistake on a large region must cost more than one on a small region."""
+        import torch
+        from gcn_grabcut.losses import TrimapLoss
+        from gcn_grabcut.model import CLASS_BG, CLASS_FG
+
+        loss_fn = TrimapLoss(gamma=2.0, dice_weight=0.0)
+        logits  = torch.tensor([[4.0, 0.0, 0.0], [4.0, 0.0, 0.0]])
+        labels  = torch.tensor([CLASS_BG, CLASS_FG])       # second is wrong
+
+        big_wrong   = loss_fn(logits, labels, area=torch.tensor([0.1, 0.9]))
+        small_wrong = loss_fn(logits, labels, area=torch.tensor([0.9, 0.1]))
+        assert big_wrong.item() > small_wrong.item()
+
+    def test_trimap_loss_dice_rewards_overlap(self):
+        import torch
+        from gcn_grabcut.losses import TrimapLoss
+        from gcn_grabcut.model import CLASS_FG
+
+        loss_fn = TrimapLoss(gamma=0.0, dice_weight=1.0)
+        labels  = torch.tensor([CLASS_FG, CLASS_FG])
+        area    = torch.tensor([0.5, 0.5])
+        good    = loss_fn(torch.tensor([[0.0, 0.0, 6.0]] * 2), labels, area=area)
+        bad     = loss_fn(torch.tensor([[6.0, 0.0, 0.0]] * 2), labels, area=area)
+        assert good.item() < bad.item()
 
 
 # -----------------------------------------------------------------------  pipeline (torch required)
@@ -367,7 +439,7 @@ class TestPipeline:
         img      = _img(100, 100)
         model    = ResGCNNet(hidden_channels=32, n_layers=2)
         pipeline = GCNGrabCutPipeline(model, device="cpu")
-        result   = pipeline.segment(img, [(50, 50)], [(5, 5)])
+        result   = pipeline.segment(img)
 
         assert result.binary_mask.shape  == (100, 100)
         assert result.trimap.shape       == (100, 100)
@@ -393,7 +465,7 @@ class TestPipeline:
         gt       = _circle_mask(100, 100)
         model    = GCNTrimapNet(hidden_channels=16, n_layers=2)
         pipeline = GCNGrabCutPipeline(model, device="cpu")
-        result   = pipeline.segment(img, [(50, 50)], [(5, 5)])
+        result   = pipeline.segment(img)
         seg_m, tri_m = result.evaluate_against(gt)
         assert 0 <= seg_m.iou <= 1
         assert 0 <= tri_m.fg_recall <= 1
