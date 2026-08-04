@@ -132,6 +132,13 @@ class GrabCut:
             trimap = trimap.copy()
             trimap[trimap == cv2.GC_PR_BGD] = cv2.GC_BGD
 
+        # A single-class trimap cannot seed the GMMs — cv2 would abort inside
+        # initGMMs. Return the trimap's own labelling instead of crashing.
+        if not (trimap == cv2.GC_FGD).any() or not (trimap == cv2.GC_BGD).any():
+            self.mask = trimap.copy()
+            self._snapshot("trimap_degenerate")
+            return self._binary()
+
         self.mask = trimap.copy()
         self._bgd = np.zeros((1, 65), np.float64)
         self._fgd = np.zeros((1, 65), np.float64)
