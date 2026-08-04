@@ -55,7 +55,7 @@ The image is over-segmented into $`N`$ regions forming a partition
 ```math
 \mathcal{S} = \{S_1,\dots,S_N\},\qquad
 \bigcup_{i=1}^{N} S_i = \Omega,\qquad
-S_i \cap S_j = \emptyset \quad (i \neq j), \tag{1}
+S_i \cap S_j = \emptyset \quad (i \neq j), \qquad \text{(1)}
 ```
 
 represented by the label map $`\ell : \Omega \to \{1,\dots,N\}`$ with
@@ -83,14 +83,14 @@ Classical GrabCut computes $`M = \mathrm{GC}(I, T)`$ from a user-supplied trimap
 $`T`$. This work replaces the user by a learned map
 
 ```math
-f_\theta : \mathcal{G} \longmapsto \big( P(c \mid v_i) \big)_{i = 1 \dots N,\; c \in \mathcal{C}} \tag{2}
+f_\theta : \mathcal{G} \longmapsto \big( P(c \mid v_i) \big)_{i = 1 \dots N,\; c \in \mathcal{C}} \qquad \text{(2)}
 ```
 
 followed by a deterministic projection $`\Pi`$ from region posteriors to a pixel
 trimap, so that the complete pipeline is the composition
 
 ```math
-M = \mathrm{GC}\Big( I,\; \Pi\big( f_\theta(\mathcal{G}(I)),\, \ell,\, I \big) \Big), \tag{3}
+M = \mathrm{GC}\Big( I,\; \Pi\big( f_\theta(\mathcal{G}(I)),\, \ell,\, I \big) \Big), \qquad \text{(3)}
 ```
 
 in which every argument derives from $`I`$ alone. Sections 3.1 to 3.3 give
@@ -127,7 +127,7 @@ descriptors,
 ```math
 \varphi(S_i) = \big[\, \mu_i^{\text{LAB}},\; \sigma_i^{\text{LAB}},\;
 \mu_i^{\text{HSV}},\; \bar{p}_i,\; a_i,\; \kappa_i,\; \bar{g}_i,\;
-\beta_i,\; d_i \,\big] \in \mathbb{R}^{16}, \tag{4}
+\beta_i,\; d_i \,\big] \in \mathbb{R}^{16}, \qquad \text{(4)}
 ```
 
 with $`\sigma_i`$ the per-channel colour standard deviation, $`\kappa_i`$ the
@@ -138,7 +138,7 @@ distance to the image centre. Concatenating the prior of Section 3.2 gives
 
 ```math
 \mathbf{x}_i = \big[\, \varphi(S_i) \;\Vert\; \boldsymbol{\pi}_i \,\big]
-\in \mathbb{R}^{19}, \qquad \boldsymbol{\pi}_i \in [0,1]^3 . \tag{5}
+\in \mathbb{R}^{19}, \qquad \boldsymbol{\pi}_i \in [0,1]^3 . \qquad \text{(5)}
 ```
 
 The edge set is the union of two relations. Region adjacency connects regions
@@ -146,14 +146,14 @@ sharing a pixel boundary,
 
 ```math
 \mathcal{E}_{\text{adj}} = \big\{\, (i,j) : \exists\, (p,q) \in \mathcal{A}
-\text{ with } \ell(p) = i,\; \ell(q) = j,\; i \neq j \,\big\}, \tag{6}
+\text{ with } \ell(p) = i,\; \ell(q) = j,\; i \neq j \,\big\}, \qquad \text{(6)}
 ```
 
 where $`\mathcal{A}`$ is the 4- or 8-connected pixel adjacency. The count
 
 ```math
 s_{ij} = \big| \big\{\, (p,q) \in \mathcal{A} :
-\{\ell(p), \ell(q)\} = \{i,j\} \,\big\} \big| \tag{7}
+\{\ell(p), \ell(q)\} = \{i,j\} \,\big\} \big| \qquad \text{(7)}
 ```
 
 in (7) is exactly the shared boundary length, so the edge set and that attribute
@@ -164,7 +164,7 @@ touch,
 ```math
 \mathcal{E}_{\text{nl}} = \big\{\, (i,j) \notin \mathcal{E}_{\text{adj}} :
 \lVert \mu_i - \mu_j \rVert_2 \text{ among the } k \text{ smallest over }
-m \notin \mathcal{N}_{\text{adj}}(i) \,\big\}, \tag{8}
+m \notin \mathcal{N}_{\text{adj}}(i) \,\big\}, \qquad \text{(8)}
 ```
 
 which gives message passing a path between disconnected parts of one object
@@ -174,7 +174,7 @@ without additional layers. Each edge carries
 \mathbf{e}_{ij} = \big[\; \lVert \mu_i - \mu_j \rVert_2,\;
 \lVert \bar{p}_i - \bar{p}_j \rVert_2,\; s_{ij},\;
 |\bar{g}_i - \bar{g}_j|,\;
-\mathbf{1}\big[(i,j) \in \mathcal{E}_{\text{nl}}\big] \;\big] \in \mathbb{R}^{5}, \tag{9}
+\mathbf{1}\big[(i,j) \in \mathcal{E}_{\text{nl}}\big] \;\big] \in \mathbb{R}^{5}, \qquad \text{(9)}
 ```
 
 the first three scaled to $`[0,1]`$ per image. The graph is stored symmetrically,
@@ -199,7 +199,7 @@ by region area and damped by spatial distance:
 c_i = \sum_{j=1}^{N} a_j \,
 \exp\!\left( -\frac{\lVert \bar{p}_i - \bar{p}_j \rVert_2^2}{2\sigma_s^2} \right)
 \lVert \mu_i - \mu_j \rVert_2 ,
-\qquad \sigma_s = 0.40 . \tag{10}
+\qquad \sigma_s = 0.40 . \qquad \text{(10)}
 ```
 
 A Gaussian centre prior modulates it,
@@ -208,7 +208,7 @@ A Gaussian centre prior modulates it,
 g_i = \exp\!\left( -\frac{\lVert \bar{p}_i - (\tfrac12, \tfrac12) \rVert_2^2}{2\sigma_c^2} \right),
 \qquad \sigma_c = 0.45,
 \qquad
-\pi_i^{\mathrm{fg}} = \mathcal{U}\big[\, \mathcal{U}[c_i] \cdot g_i \,\big]. \tag{11}
+\pi_i^{\mathrm{fg}} = \mathcal{U}\big[\, \mathcal{U}[c_i] \cdot g_i \,\big]. \qquad \text{(11)}
 ```
 
 **Background-ness.** Following the boundary connectivity of Zhu et al. (2014),
@@ -220,13 +220,13 @@ and frame coverage $`b_i = |S_i \cap \partial\Omega| / |S_i|`$,
 \mu_{\mathrm{bg}} = \sum_{i=1}^{N} \beta_i^{\partial} \mu_i ,
 \qquad
 \sigma_{\mathrm{bg}}^2 = \sum_{i=1}^{N} \beta_i^{\partial}
-\big\lVert \mu_i - \mu_{\mathrm{bg}} \big\rVert_2^2 , \tag{12}
+\big\lVert \mu_i - \mu_{\mathrm{bg}} \big\rVert_2^2 , \qquad \text{(12)}
 ```
 
 ```math
 \pi_i^{\mathrm{bg}} = \mathcal{U}\!\left[\, \max\!\left(
 \exp\!\left( -\frac{\lVert \mu_i - \mu_{\mathrm{bg}} \rVert_2^2}{2\sigma_{\mathrm{bg}}^2} \right),\;
-\min(4 b_i,\, 1) \right) \right], \tag{13}
+\min(4 b_i,\, 1) \right) \right], \qquad \text{(13)}
 ```
 
 so that touching the frame is itself evidence of background.
@@ -234,7 +234,7 @@ so that touching the frame is itself evidence of background.
 **Ambiguity.** The third channel marks where the two cues disagree,
 
 ```math
-\pi_i^{\mathrm{amb}} = 1 - \big| \pi_i^{\mathrm{fg}} - \pi_i^{\mathrm{bg}} \big| . \tag{14}
+\pi_i^{\mathrm{amb}} = 1 - \big| \pi_i^{\mathrm{fg}} - \pi_i^{\mathrm{bg}} \big| . \qquad \text{(14)}
 ```
 
 All three are deterministic functions of $`I`$, so the node attributes are fully
@@ -248,7 +248,7 @@ descriptors are first standardised by running statistics $`(m, v)`$ accumulated 
 training,
 
 ```math
-\hat{\mathbf{x}}_i = \frac{\mathbf{x}_i - m}{\sqrt{v + \epsilon}} , \tag{15}
+\hat{\mathbf{x}}_i = \frac{\mathbf{x}_i - m}{\sqrt{v + \epsilon}} , \qquad \text{(15)}
 ```
 
 which removes the need to hand-scale channels of very different magnitude — area
@@ -258,7 +258,7 @@ is then modulated by the prior,
 ```math
 \mathbf{h}_i^{(0)} = \Big( \mathrm{GELU} \circ \mathrm{LN} \circ W_{\text{in}} \Big)
 \hat{\mathbf{x}}_i \;\odot\;
-\Big( \mathbf{1} + \sigma\big( \mathrm{MLP}_\pi(\boldsymbol{\pi}_i) \big) \Big), \tag{16}
+\Big( \mathbf{1} + \sigma\big( \mathrm{MLP}_\pi(\boldsymbol{\pi}_i) \big) \Big), \qquad \text{(16)}
 ```
 
 so confident prior evidence is amplified before any convolution, where $`\odot`$ is
@@ -270,7 +270,7 @@ once into a per-node multiplicative gate
 ```math
 \mathbf{g}_i = \sigma\!\left( W_g \, \mathrm{LN}\!\left(
 \frac{1}{|\mathcal{N}(i)|} \sum_{j \in \mathcal{N}(i)} \phi_e(\mathbf{e}_{ij})
-\right) \right) \in (0,1)^D \tag{17}
+\right) \right) \in (0,1)^D \qquad \text{(17)}
 ```
 
 that every block reads. Re-projecting and re-scattering edges inside each block
@@ -282,12 +282,12 @@ evaluated once per forward pass regardless of $`n`$.
 ```math
 \mathbf{u}_i^{(\ell)} = \sum_{j \in \mathcal{N}(i) \cup \{i\}}
 \frac{1}{\sqrt{\hat{d}_i \hat{d}_j}} \; W^{(\ell)} \,
-\mathrm{LN}\big( \mathbf{h}_j^{(\ell-1)} \big), \tag{18}
+\mathrm{LN}\big( \mathbf{h}_j^{(\ell-1)} \big), \qquad \text{(18)}
 ```
 
 ```math
 \mathbf{h}_i^{(\ell)} = \mathbf{h}_i^{(\ell-1)} + \mathrm{Drop}\Big(
-\mathrm{GELU}\big( \mathbf{g}_i \odot \mathbf{u}_i^{(\ell)} \big) \Big), \tag{19}
+\mathrm{GELU}\big( \mathbf{g}_i \odot \mathbf{u}_i^{(\ell)} \big) \Big), \qquad \text{(19)}
 ```
 
 that is, pre-norm graph convolution (Kipf and Welling, 2017) gated by the edge
@@ -299,7 +299,7 @@ scale,
 ```math
 \mathbf{h}_i^{(n+1)} = \mathrm{GELU}\left( \mathrm{LN}\left(
 W_1 \mathbf{h}_i^{(n)} + W_2 \frac{1}{|\mathcal{N}(i)|}
-\sum_{j \in \mathcal{N}(i)} \mathbf{h}_j^{(n)} \right) \right). \tag{20}
+\sum_{j \in \mathcal{N}(i)} \mathbf{h}_j^{(n)} \right) \right). \qquad \text{(20)}
 ```
 
 **Depth fusion.** Rather than concatenating the $`n+2`$ representations, they are
@@ -309,7 +309,7 @@ $`\boldsymbol{\alpha} \in \mathbb{R}^{n+2}`$ (Xu et al., 2018),
 ```math
 \mathbf{w} = \mathrm{softmax}(\boldsymbol{\alpha}) \in \Delta^{n+1},
 \qquad
-\mathbf{z}_i = \sum_{k=0}^{n+1} w_k \, \mathbf{h}_i^{(k)} . \tag{21}
+\mathbf{z}_i = \sum_{k=0}^{n+1} w_k \, \mathbf{h}_i^{(k)} . \qquad \text{(21)}
 ```
 
 Concatenation would force the head to accept $`D(n+2)`$ channels, which dominates
@@ -327,7 +327,7 @@ that graphs may share a batch, gates the fused representation:
 \mathbf{s} = \sum_{i=1}^{N} \alpha_i \mathbf{z}_i ,
 \qquad
 \tilde{\mathbf{z}}_i = \mathbf{z}_i \odot
-\sigma\big( W_e \, \mathrm{ReLU}(W_c \mathbf{s}) \big), \tag{22}
+\sigma\big( W_e \, \mathrm{ReLU}(W_c \mathbf{s}) \big), \qquad \text{(22)}
 ```
 
 and the posterior follows from a two-layer head,
@@ -335,7 +335,7 @@ and the posterior follows from a two-layer head,
 ```math
 P(c \mid v_i) = \mathrm{softmax}\Big( W_h \,
 \mathrm{Drop}\big( \mathrm{GELU}\big( W_f \,
-\mathrm{LN}(\tilde{\mathbf{z}}_i) \big) \big) \Big)_c . \tag{23}
+\mathrm{LN}(\tilde{\mathbf{z}}_i) \big) \big) \Big)_c . \qquad \text{(23)}
 ```
 
 Two alternatives share this interface. `GATTrimapNet` replaces convolution with
@@ -351,7 +351,7 @@ superpixel boundary, and GrabCut would inherit that quantisation. Instead each
 class posterior is projected to pixels through the label map,
 
 ```math
-q^c(p) = P\big( c \mid v_{\ell(p)} \big), \qquad c \in \{\mathrm{bg}, \mathrm{fg}\}, \tag{24}
+q^c(p) = P\big( c \mid v_{\ell(p)} \big), \qquad c \in \{\mathrm{bg}, \mathrm{fg}\}, \qquad \text{(24)}
 ```
 
 and filtered under the grey-level image $`I_g`$ as guide, using the box-filter
@@ -362,11 +362,11 @@ A_k = \frac{\mathrm{cov}_{\omega_k}\big( I_g,\, q^c \big)}
 {\mathrm{var}_{\omega_k}(I_g) + \varepsilon},
 \qquad
 B_k = \mathrm{mean}_{\omega_k}\big( q^c \big)
-- A_k \mathrm{mean}_{\omega_k}(I_g), \tag{25}
+- A_k \mathrm{mean}_{\omega_k}(I_g), \qquad \text{(25)}
 ```
 
 ```math
-\tilde{q}^c(p) = \overline{A}(p) \, I_g(p) + \overline{B}(p), \tag{26}
+\tilde{q}^c(p) = \overline{A}(p) \, I_g(p) + \overline{B}(p), \qquad \text{(26)}
 ```
 
 where $`\overline{A}, \overline{B}`$ average the per-window coefficients over the
@@ -382,7 +382,7 @@ T(p) = \begin{cases}
 \\ 3 \;\; \text{(probable foreground)} & \tilde{q}^{\mathrm{fg}}(p) > \tilde{q}^{\mathrm{bg}}(p)
    \;\text{ and neither threshold is met},
 \\ 2 \;\; \text{(probable background)} & \text{otherwise.}
-\end{cases} \tag{27}
+\end{cases} \qquad \text{(27)}
 ```
 
 By (27) a region is declared definite only when its posterior clears $`\theta`$;
@@ -398,7 +398,7 @@ and Gaussian-mixture parameters $`\Theta`$,
 E(M, k, \Theta, I) = \sum_{p \in \Omega} D\big( M_p, k_p, \Theta, I(p) \big)
 \; + \; \gamma \sum_{(p,q) \in \mathcal{A}}
 \mathbf{1}\big[ M_p \neq M_q \big] \,
-\exp\!\big( -\varsigma \lVert I(p) - I(q) \rVert_2^2 \big), \tag{28}
+\exp\!\big( -\varsigma \lVert I(p) - I(q) \rVert_2^2 \big), \qquad \text{(28)}
 ```
 
 minimised by alternating mixture re-estimation with a graph min-cut, where $`D`$ is
@@ -413,7 +413,7 @@ side,
 
 ```math
 T(S_i) \leftarrow 3 \quad \text{for the } \lceil 0.1 N \rceil
-\text{ regions of largest } \pi_i^{\mathrm{fg}} . \tag{29}
+\text{ regions of largest } \pi_i^{\mathrm{fg}} . \qquad \text{(29)}
 ```
 
 Afterwards, connected components of $`M`$ covering less than a fraction $`a_{\min}`$
@@ -437,7 +437,7 @@ y_i = \begin{cases}
 \\ \mathrm{bg}  & \rho_i \leq 1 - \tau,
 \\ \mathrm{unk} & \text{otherwise,}
 \end{cases}
-\qquad \tau = 0.70 . \tag{30}
+\qquad \tau = 0.70 . \qquad \text{(30)}
 ```
 
 Labelling mixed regions *unknown* is the correct target rather than a compromise:
@@ -451,7 +451,7 @@ very different amounts of overlap. Two terms remove it. Write
 $`p_{i,c} = P(c \mid v_i)`$ and normalise the area weights to unit mean,
 
 ```math
-\omega_i = \frac{N a_i}{\sum_{j=1}^{N} a_j} . \tag{31}
+\omega_i = \frac{N a_i}{\sum_{j=1}^{N} a_j} . \qquad \text{(31)}
 ```
 
 The classification term is an area-weighted focal cross-entropy (Lin et al., 2017)
@@ -460,14 +460,14 @@ with class weights $`\lambda_c`$,
 ```math
 \mathcal{L}_{\text{cls}} = \frac{1}{N} \sum_{i=1}^{N} \omega_i
 \big( 1 - p_{i, y_i} \big)^{\gamma}
-\big( -\lambda_{y_i} \log p_{i, y_i} \big), \qquad \gamma = 2, \tag{32}
+\big( -\lambda_{y_i} \log p_{i, y_i} \big), \qquad \gamma = 2, \qquad \text{(32)}
 ```
 
 so an error is penalised in proportion to the image area it covers. The overlap
 term is a soft Dice score on the expected foreground coverage
 
 ```math
-u_i = p_{i, \mathrm{fg}} + \tfrac{1}{2} p_{i, \mathrm{unk}}, \tag{33}
+u_i = p_{i, \mathrm{fg}} + \tfrac{1}{2} p_{i, \mathrm{unk}}, \qquad \text{(33)}
 ```
 
 accumulated with area weights and evaluated per image $`b`$ in a batch
@@ -476,7 +476,7 @@ $`\mathcal{B}`$:
 ```math
 \mathcal{L}_{\text{dice}} = \frac{1}{|\mathcal{B}|} \sum_{b \in \mathcal{B}}
 \left( 1 - \frac{2 \sum_{i \in b} a_i u_i \rho_i + \varepsilon}
-{\sum_{i \in b} a_i u_i + \sum_{i \in b} a_i \rho_i + \varepsilon} \right). \tag{34}
+{\sum_{i \in b} a_i u_i + \sum_{i \in b} a_i \rho_i + \varepsilon} \right). \qquad \text{(34)}
 ```
 
 Unlike cross-entropy this responds to the shape of the whole mask rather than to
@@ -487,7 +487,7 @@ objective is
 
 ```math
 \mathcal{L} = \mathcal{L}_{\text{cls}} + \lambda \, \mathcal{L}_{\text{dice}},
-\qquad \lambda = \tfrac{1}{2} . \tag{35}
+\qquad \lambda = \tfrac{1}{2} . \qquad \text{(35)}
 ```
 
 Model selection uses
@@ -507,7 +507,7 @@ Optimisation uses AdamW with layer-wise learning-rate decay, the $`\ell`$-th blo
 receiving
 
 ```math
-\eta_\ell = \eta_0 \cdot 0.8^{\,n - \ell}, \tag{36}
+\eta_\ell = \eta_0 \cdot 0.8^{\,n - \ell}, \qquad \text{(36)}
 ```
 
 so that early layers, on which everything downstream depends, move more slowly.
@@ -537,7 +537,7 @@ The cost of each stage follows from an asymptotic argument rather than from tuni
 Graph construction is
 
 ```math
-O(HW) \; + \; O(N^2), \tag{37}
+O(HW) \; + \; O(N^2), \qquad \text{(37)}
 ```
 
 the first term covering all region reductions, which are sums over pixels grouped
@@ -554,7 +554,7 @@ region. On an $`800 \times 600`$ image with 266 regions this is 1.0 ms rather th
 A forward pass costs
 
 ```math
-O\big( |\mathcal{E}| D + N D^2 \big), \tag{38}
+O\big( |\mathcal{E}| D + N D^2 \big), \qquad \text{(38)}
 ```
 
 in which the edge term does not scale with depth, because the encoding (17) is
@@ -585,7 +585,7 @@ complete pipeline attains
 \overline{\mathrm{IoU}} = 0.584, \qquad
 \mathrm{med}\,\mathrm{IoU} = 0.640, \qquad
 \mathrm{Pr}\big[ \mathrm{IoU} > 0.5 \big] = 0.68, \qquad
-\mathrm{Pr}\big[ \mathrm{IoU} > 0.7 \big] = 0.38, \tag{39}
+\mathrm{Pr}\big[ \mathrm{IoU} > 0.7 \big] = 0.38, \qquad \text{(39)}
 ```
 
 against $`\overline{\mathrm{IoU}} = 0.109`$ for the trivial all-foreground
