@@ -4,18 +4,18 @@ Dataset utilities for GCN-GrabCut training.
 Responsibilities
 ----------------
 1. Load image/mask pairs from disk.
-2. Simulate user interaction (random click sampling).
-3. Apply augmentation (flip, colour jitter, random rotation, crop).
-4. Pre-compute superpixel graphs + derive per-superpixel trimap labels.
-5. Cache processed graphs to speed up subsequent epochs.
+2. Apply augmentation (flip, colour jitter, random rotation, crop).
+3. Pre-compute superpixel graphs + derive per-superpixel trimap labels.
+4. Cache processed graphs to speed up subsequent epochs.
+
+Training is click-free: node inputs carry the automatic FG/BG prior computed
+by `GraphBuilder`, exactly as at inference time.
 
 Sample dict schema
 ------------------
 {
   "image"     : np.ndarray  (H, W, 3) BGR uint8
   "gt_mask"   : np.ndarray  (H, W)    uint8 binary {0, 1}
-  "fg_points" : list[(row, col)]
-  "bg_points" : list[(row, col)]
   "name"      : str
 }
 
@@ -26,7 +26,10 @@ from __future__ import annotations
 
 import numpy as np
 import cv2
+import os
 import random
+import time
+import zlib
 from pathlib import Path
 from typing import Optional
 import logging
@@ -40,12 +43,13 @@ try:
 except ImportError:
     _TORCH = False
 
-from .graph_builder import GraphBuilder, SuperpixelGraphConfig, encode_user_hints
+from .graph_builder import GraphBuilder, SuperpixelGraphConfig
 from .model import CLASS_BG, CLASS_UNK, CLASS_FG, N_NODE_FEATS
 
 
 # -----------------------------------------------------------------------
-# Click simulation
+# Click simulation (legacy — unused by the automatic pipeline, kept for
+# ablations against the old interactive baseline)
 # -----------------------------------------------------------------------
 
 def sample_clicks(
@@ -188,18 +192,17 @@ def derive_trimap_labels(
     labels : (N,) int64
     """
     n_nodes = int(segments.max()) + 1
-    labels  = np.ones(n_nodes, dtype=np.int64)   # default: unknown
+    flat    = segments.ravel()
 
-    for nid in range(n_nodes):
-        m = segments == nid
-        if not m.any():
-            continue
-        fg_ratio = gt_mask[m].mean()
-        if fg_ratio >= fg_threshold:
-            labels[nid] = CLASS_FG
-        elif fg_ratio <= 1 - bg_threshold:
-            labels[nid] = CLASS_BG
+    counts = np.bincount(flat, minlength=n_nodes).astype(np.float64)
+    fg_sum = np.bincount(flat, weights=(gt_mask.ravel() > 0).astype(np.float64),
+                         minlength=n_nodes)
+    fg_ratio = fg_sum / np.maximum(counts, 1.0)
 
+    labels = np.full(n_nodes, CLASS_UNK, dtype=np.int64)
+    labels[fg_ratio >= fg_threshold]     = CLASS_FG
+    labels[fg_ratio <= 1 - bg_threshold] = CLASS_BG
+    labels[counts == 0]                  = CLASS_UNK
     return labels
 
 
@@ -210,14 +213,24 @@ def derive_trimap_labels(
 def prepare_sample(
     sample:    dict,
     sp_config: Optional[SuperpixelGraphConfig] = None,
+    fg_threshold: float = 0.70,
+    bg_threshold: float = 0.70,
 ) -> tuple:
     """
     Convert a raw sample dict → (PyG Data, labels tensor, segments array).
 
+    The returned graph carries three supervision-relevant tensors besides the
+    node/edge features: `node_area` (region size as a fraction of the image),
+    `y` (per-region trimap label) and `fg_ratio` (soft foreground coverage).
+    Area weighting lets the loss approximate a pixel-level objective while
+    still being evaluated once per region, and the soft ratio is what makes
+    boundary regions contribute a graded rather than binary signal.
+
     Parameters
     ----------
-    sample : dict with keys image, gt_mask, fg_points, bg_points
+    sample : dict with keys image, gt_mask
     sp_config : superpixel configuration
+    fg_threshold / bg_threshold : region purity required for a definite label
 
     Returns
     -------
@@ -226,21 +239,347 @@ def prepare_sample(
     builder = GraphBuilder(sample["image"], sp_config)
     graph   = builder.build()
 
-    hints   = encode_user_hints(
-        graph.segments,
-        sample.get("fg_points", []),
-        sample.get("bg_points", []),
-    )
+    segments = graph.segments
+    gt_mask  = sample["gt_mask"]
+    n_nodes  = graph.n_nodes
+    flat     = segments.ravel()
+    counts   = np.bincount(flat, minlength=n_nodes).astype(np.float32)
+    fg_ratio = (np.bincount(flat, weights=(gt_mask.ravel() > 0).astype(np.float64),
+                            minlength=n_nodes) / np.maximum(counts, 1.0)).astype(np.float32)
 
-    x = np.concatenate([graph.node_features, hints], axis=1)   # (N, 19)
+    labels = derive_trimap_labels(segments, gt_mask, fg_threshold, bg_threshold)
+
     data = Data(
-        x=torch.tensor(x, dtype=torch.float32),
+        x=torch.tensor(graph.node_input(), dtype=torch.float32),   # (N, 19)
         edge_index=torch.tensor(graph.edge_index, dtype=torch.long),
         edge_attr=torch.tensor(graph.edge_attr,  dtype=torch.float32),
+        node_area=torch.tensor(graph.node_areas, dtype=torch.float32),
+        fg_ratio=torch.tensor(fg_ratio, dtype=torch.float32),
+        y=torch.tensor(labels, dtype=torch.long),
     )
+    return data, data.y, segments
 
-    labels = derive_trimap_labels(graph.segments, sample["gt_mask"])
-    return data, torch.tensor(labels, dtype=torch.long), graph.segments
+
+def list_image_mask_pairs(
+    images_dir:     str | Path,
+    masks_dir:      str | Path,
+    max_size:       int = 512,
+    augment_copies: int = 0,
+    seed:           int = 0,
+) -> list[dict]:
+    """
+    Enumerate image/mask pairs as *descriptors* rather than decoded pixels.
+
+    A descriptor names the files, the resize target, and — for augmented
+    variants — the seed that determines the transform. Nothing is read from
+    disk here, so a dataset of any size costs kilobytes in the parent process,
+    and each graph builder decodes only the one image it is working on. This
+    matters as soon as a dataset no longer fits in memory: holding ten thousand
+    decoded images and then sending copies of them to a process pool is what
+    makes preparation run out of memory rather than out of time.
+
+    Augmented variants are seeded, so the same descriptor always yields the
+    same transformed image and can therefore be cached like any other.
+
+    Returns
+    -------
+    list of dicts with keys image_path, mask_path, name, max_size, aug_seed
+    """
+    images_dir, masks_dir = Path(images_dir), Path(masks_dir)
+    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+
+    out, missing = [], 0
+    for img_path in sorted(f for f in images_dir.iterdir()
+                           if f.suffix.lower() in image_exts):
+        mask_path = next((masks_dir / (img_path.stem + ext)
+                          for ext in (".png", ".jpg", ".bmp", ".tif")
+                          if (masks_dir / (img_path.stem + ext)).exists()), None)
+        if mask_path is None:
+            missing += 1
+            continue
+
+        base = dict(image_path=str(img_path), mask_path=str(mask_path),
+                    max_size=max_size)
+        out.append({**base, "name": img_path.stem, "aug_seed": None})
+        for k in range(augment_copies):
+            # crc32, not hash(): string hashing is salted per interpreter, so the
+            # same variant would draw a different seed — and therefore occupy a
+            # different cache entry — on every run.
+            stem_id = zlib.crc32(img_path.stem.encode()) % 100003
+            out.append({**base, "name": f"{img_path.stem}_aug{k}",
+                        "aug_seed": seed + 1000003 * k + stem_id})
+
+    print(f"[Dataset] {len(out)} descriptors from {images_dir.name} "
+          f"({missing} without a mask)")
+    return out
+
+
+def materialise(sample: dict) -> Optional[dict]:
+    """
+    Decode a descriptor into an image/mask pair, applying seeded augmentation.
+
+    Samples that already carry pixel arrays are returned unchanged, so both
+    descriptor-based and in-memory datasets flow through the same code path.
+    Returns None when the pair is unreadable or degenerate.
+    """
+    if "image" in sample and "gt_mask" in sample:
+        return sample
+
+    # A decode is retried before the pair is given up on: under concurrent load
+    # from slow or removable storage, reads fail intermittently and OpenCV
+    # reports that as None rather than as an error. Treating the first failure
+    # as final silently shrinks the dataset, which is worse than being slow.
+    image = mask = None
+    for attempt in range(3):
+        image = cv2.imread(sample["image_path"])
+        mask  = cv2.imread(sample["mask_path"], cv2.IMREAD_GRAYSCALE)
+        if image is not None and mask is not None:
+            break
+        time.sleep(0.05 * (attempt + 1))
+    if image is None or mask is None:
+        logger.warning("unreadable pair: %s", sample.get("image_path"))
+        return None
+
+    image, mask = _resize_pair(image, mask, sample.get("max_size", 512))
+    gt_mask = (mask > 127).astype(np.uint8)
+
+    if sample.get("aug_seed") is not None:
+        state = random.getstate()
+        random.seed(sample["aug_seed"])
+        try:
+            image, gt_mask = augment_sample(
+                image, gt_mask,
+                prob_flip=0.5, prob_rotate=0.4, prob_color=0.6, prob_crop=0.4,
+            )
+        finally:
+            random.setstate(state)
+
+    if gt_mask.sum() < 200 or (1 - gt_mask).sum() < 200:
+        return None
+
+    return {"image": image, "gt_mask": gt_mask, "name": sample.get("name", "")}
+
+
+def _cache_key(sample: dict, sp_config: Optional[SuperpixelGraphConfig],
+               fg_threshold: float, bg_threshold: float) -> str:
+    import hashlib
+    cfg = sp_config or SuperpixelGraphConfig()
+    h   = hashlib.sha1()
+    if "image" in sample:
+        h.update(np.ascontiguousarray(sample["image"]))
+        h.update(np.ascontiguousarray(sample["gt_mask"]))
+    else:
+        h.update(repr((sample["image_path"], sample["mask_path"],
+                       sample.get("max_size"), sample.get("aug_seed"))).encode())
+    h.update(repr((cfg.n_segments, cfg.compactness, cfg.sigma, cfg.use_lab,
+                   cfg.connectivity, cfg.n_nonlocal,
+                   fg_threshold, bg_threshold)).encode())
+    return h.hexdigest()[:20]
+
+
+_THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                "NUMEXPR_NUM_THREADS")
+
+
+def _worker_init() -> None:
+    """
+    Restrict each worker to one compute thread.
+
+    Every process here handles a single small image, so the parallelism that
+    matters is across processes. Left alone, each worker starts a full
+    OpenMP/BLAS thread pool sized to the machine; with ten workers that is
+    hundreds of threads contending for sixteen cores, and they spend their time
+    blocked on one another's futexes rather than building graphs.
+    """
+    try:
+        cv2.setNumThreads(0)
+    except Exception:
+        pass
+    if _TORCH:
+        torch.set_num_threads(1)
+
+
+def _prepare_one(args: tuple):
+    """
+    Worker entry point for parallel graph preparation.
+
+    `keep_segments` is honoured here rather than in the caller because the
+    label map is returned across a process boundary: discarding it before the
+    return keeps it from being pickled at all, which for a dataset of tens of
+    thousands of images is several gigabytes that never need to move.
+    """
+    sample, sp_config, fg_t, bg_t, cache_dir, keep_segments = args
+    path = None
+    if cache_dir is not None:
+        path = Path(cache_dir) / f"{_cache_key(sample, sp_config, fg_t, bg_t)}.pt"
+        if path.exists():
+            try:
+                blob = torch.load(path, map_location="cpu", weights_only=False)
+                data = blob["data"]
+                return data, data.y, (blob["segments"] if keep_segments else None)
+            except Exception:
+                pass   # corrupt or stale cache entry — rebuild it
+
+    # Decoding happens after the cache lookup, so a cache hit never reads the
+    # source image at all.
+    sample = materialise(sample)
+    if sample is None:
+        return None
+
+    data, labels, segments = prepare_sample(sample, sp_config, fg_t, bg_t)
+    if path is not None:
+        # Written to a temporary name and renamed, so that a run interrupted
+        # mid-write cannot leave a truncated entry behind: a partially written
+        # archive can take the loading process down rather than merely raise.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        try:
+            torch.save({"data": data, "segments": segments}, tmp)
+            os.replace(tmp, path)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+    return data, labels, (segments if keep_segments else None)
+
+
+def prepare_dataset(
+    samples:        list[dict],
+    sp_config:      Optional[SuperpixelGraphConfig] = None,
+    fg_threshold:   float = 0.70,
+    bg_threshold:   float = 0.70,
+    cache_dir:      Optional[str | Path] = None,
+    workers:        int = 0,
+    desc:           str = "",
+    keep_segments:  bool = True,
+) -> list[tuple]:
+    """
+    Build the graph for every sample, in parallel and with an optional cache.
+
+    Graph construction is deterministic in the image, so it is done once and
+    reused for every epoch. Superpixel extraction is CPU-bound and releases
+    nothing to the GPU, which makes it the natural place to spend processes:
+    `workers > 0` fans the work out, `cache_dir` persists the result across
+    runs so a second experiment on the same data starts training immediately.
+
+    The pixel label map is two orders of magnitude larger than the graph it
+    produced and is not read during optimisation, so `keep_segments=False`
+    discards it after use; on a dataset of tens of thousands of images that is
+    the difference between a few hundred megabytes and several gigabytes of
+    resident memory.
+
+    Returns
+    -------
+    list of (Data, labels, segments); segments is None when not kept, and
+    samples that fail to build are dropped.
+    """
+    jobs = [(s, sp_config, fg_threshold, bg_threshold,
+             str(cache_dir) if cache_dir else None, keep_segments)
+            for s in samples]
+
+    records: list[tuple] = []
+    failures: list[str] = []
+    t0 = time.perf_counter()
+
+    if workers and workers > 1 and len(jobs) > 1:
+        # Jobs are submitted individually rather than mapped, so that a failing
+        # sample is isolated instead of discarding the whole batch, and the pool
+        # is rebuilt if a worker dies outright — over tens of thousands of
+        # images a single unreadable file should not cost the entire run.
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        from concurrent.futures.process import BrokenProcessPool
+
+        # Workers are spawned rather than forked. By the time a dataset is
+        # prepared the parent has usually initialised a CUDA context — the model
+        # is placed on the device when the trainer is constructed — and a forked
+        # child inheriting that context is unsupported: the child dies without
+        # raising, which surfaces only as a broken pool.
+        ctx = multiprocessing.get_context("spawn")
+
+        # Thread limits are exported before the pool is created so that spawned
+        # children inherit them at interpreter start, when the numerical
+        # libraries size their pools; the parent's own settings are restored
+        # afterwards.
+        saved = {k: os.environ.get(k) for k in _THREAD_VARS}
+        os.environ.update({k: "1" for k in _THREAD_VARS})
+
+        pending, attempt = list(jobs), 0
+        while pending and attempt < 3:
+            attempt += 1
+            n_workers = max(1, workers // attempt)
+            # Work is submitted in bounded windows rather than all at once:
+            # queueing tens of thousands of futures against a single pool was
+            # observed to take the workers down, while the same jobs complete
+            # reliably a few thousand at a time. The window also gives a natural
+            # place to report progress on a preparation that runs for minutes.
+            window = max(512, n_workers * 128)
+            unfinished: list[tuple] = []
+            queue = pending
+
+            try:
+                with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx,
+                                         initializer=_worker_init) as pool:
+                    for start in range(0, len(queue), window):
+                        chunk = queue[start:start + window]
+                        futures = {pool.submit(_prepare_one, j): j for j in chunk}
+                        try:
+                            for fut in as_completed(futures):
+                                try:
+                                    out = fut.result()
+                                except Exception as exc:
+                                    failures.append(repr(exc))
+                                    continue
+                                if out is not None:
+                                    records.append(out)
+                        except BrokenProcessPool:
+                            unfinished = ([j for f, j in futures.items() if not f.done()]
+                                          + queue[start + window:])
+                            break
+                        if len(queue) > window:
+                            done = min(start + window, len(queue))
+                            print(f"[Dataset] {desc}{done}/{len(queue)} prepared "
+                                  f"({time.perf_counter() - t0:.0f}s)", flush=True)
+            except BrokenProcessPool:
+                unfinished = unfinished or queue
+            pending = unfinished
+            if pending:
+                print(f"[Dataset] worker pool died; retrying {len(pending)} "
+                      f"samples with {max(1, workers // (attempt + 1))} workers")
+
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    else:
+        for job in jobs:
+            try:
+                out = _prepare_one(job)
+                if out is not None:
+                    records.append(out)
+            except Exception as exc:
+                failures.append(repr(exc))
+
+    print(f"[Dataset] {desc}{len(records)}/{len(samples)} graphs ready "
+          f"in {time.perf_counter() - t0:.1f}s"
+          + (f" (cache: {cache_dir})" if cache_dir else ""))
+
+    # Losing samples silently would misreport the size of the training set, so
+    # the tally and a sample of the distinct causes are always printed.
+    lost = len(samples) - len(records)
+    if lost:
+        seen, distinct = set(), []
+        for f in failures:
+            if f not in seen:
+                seen.add(f)
+                distinct.append(f)
+        # `failures` counts raised futures, which retries can inflate past the
+        # number of samples, so the two tallies are reported independently
+        # rather than one being derived from the other.
+        print(f"[Dataset] {desc}{lost} sample(s) missing from the result; "
+              f"{len(failures)} failure(s) raised across attempts")
+        for f in distinct[:3]:
+            print(f"[Dataset]   {f}")
+    return records
 
 
 # -----------------------------------------------------------------------
@@ -251,11 +590,8 @@ def load_image_mask_dataset(
     images_dir:     str | Path,
     masks_dir:      str | Path,
     max_size:       int   = 512,
-    n_fg_clicks:    int   = 5,
-    n_bg_clicks:    int   = 5,
     augment:        bool  = True,
     augment_factor: int   = 2,       # how many augmented copies per original
-    click_jitter:   float = 0.01,
 ) -> list[dict]:
     """
     Load all image/mask pairs from two directories.
@@ -307,34 +643,21 @@ def load_image_mask_dataset(
             continue
 
         # Base sample (no augmentation)
-        fg_pts, bg_pts = sample_clicks(gt_mask, n_fg_clicks, n_bg_clicks,
-                                       jitter=click_jitter)
-        if not fg_pts or not bg_pts:
-            skipped += 1
-            continue
-
         samples.append({
-            "image":     image,
-            "gt_mask":   gt_mask,
-            "fg_points": fg_pts,
-            "bg_points": bg_pts,
-            "name":      img_path.stem,
+            "image":   image,
+            "gt_mask": gt_mask,
+            "name":    img_path.stem,
         })
 
         # Augmented copies
         if augment:
             for aug_i in range(augment_factor):
                 aug_img, aug_mask = augment_sample(image, gt_mask)
-                fg_aug, bg_aug    = sample_clicks(aug_mask, n_fg_clicks, n_bg_clicks,
-                                                  jitter=click_jitter * 2)
-                if fg_aug and bg_aug:
-                    samples.append({
-                        "image":     aug_img,
-                        "gt_mask":   aug_mask,
-                        "fg_points": fg_aug,
-                        "bg_points": bg_aug,
-                        "name":      f"{img_path.stem}_aug{aug_i}",
-                    })
+                samples.append({
+                    "image":   aug_img,
+                    "gt_mask": aug_mask,
+                    "name":    f"{img_path.stem}_aug{aug_i}",
+                })
 
     logger.info(f"Loaded {len(samples)} samples ({skipped} skipped) from {images_dir}")
     print(f"[Dataset] {len(samples)} samples loaded ({skipped} skipped).")
@@ -413,16 +736,13 @@ def make_synthetic_dataset(
         noise = rng.randint(-30, 30, img.shape).astype(np.int16)
         img   = np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
 
-        fg_pts, bg_pts = sample_clicks(mask, n_fg=3, n_bg=3, erosion_radius=4)
-        if not fg_pts or not bg_pts:
+        if mask.sum() == 0 or (1 - mask).sum() == 0:
             continue
 
         samples.append({
-            "image":     img,
-            "gt_mask":   mask,
-            "fg_points": fg_pts,
-            "bg_points": bg_pts,
-            "name":      f"synthetic_{i:04d}_{shape}",
+            "image":   img,
+            "gt_mask": mask,
+            "name":    f"synthetic_{i:04d}_{shape}",
         })
 
     print(f"[Dataset] Generated {len(samples)} synthetic samples.")
